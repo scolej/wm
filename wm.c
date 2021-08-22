@@ -13,7 +13,7 @@ void fatal(char* msg, ...) {
   exit(1);
 }
 
-void msg(char* msg, ...) {
+void info(char* msg, ...) {
   va_list args;
   va_start(args, msg);
   vprintf(msg, args);
@@ -22,20 +22,24 @@ void msg(char* msg, ...) {
   fflush(stdout);
 }
 
+void fine(char* msg, ...) {
+  // todo
+}
+
 Display* dsp;
-XColor red;
+XColor red, grey;
 
 void manage_new_window(Window win) {
-  msg("learned about new window: %d", win);
+  info("learned about new window: %d", win);
   XSetWindowBorderWidth(dsp, win, 3);
-  XSetWindowBorder(dsp, win, red.pixel);
-  XSelectInput(dsp, win, EnterWindowMask);
+  XSetWindowBorder(dsp, win, grey.pixel);
+  XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
   // todo is it necessary to repeat this on every map?
 }
 
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
-  msg("map request for window: %d", win);
+  info("map request for window: %d", win);
   manage_new_window(win);
   XMapWindow(dsp, win);
 }
@@ -43,7 +47,7 @@ void handle_map_request(XMapRequestEvent* event) {
 void handle_enter_notify(XCrossingEvent* event) {
   Window win = event->window;
   long t = event->time;
-  msg("focus change on enter-notify to window %d", win);
+  info("changing focus on enter-notify to window %d", win);
   XSetInputFocus(dsp, win, RevertToParent, t);
 }
 
@@ -57,7 +61,7 @@ struct {
 
 void handle_button_press(XButtonEvent* event) {
   Window win = event->subwindow;
-  msg("started dragging window %d", win);
+  info("started dragging window %d", win);
 
   int x = event->x_root;
   int y = event->y_root;
@@ -72,7 +76,7 @@ void handle_button_press(XButtonEvent* event) {
 }
 
 void handle_button_release(XButtonEvent* event) {
-  msg("finish drag");
+  info("finish drag");
   drag_state.win = 0;
 }
 
@@ -83,8 +87,20 @@ void handle_motion(XMotionEvent* event) {
 
   int x = event->x_root - drag_state.start_mouse_x + drag_state.start_win_x;
   int y = event->y_root - drag_state.start_mouse_y + drag_state.start_win_y;
-  msg("dragging window %d to %d %d", drag_state.win, x, y);
+  fine("dragging window %d to %d %d", drag_state.win, x, y);
   XMoveWindow(dsp, drag_state.win, x, y);
+}
+
+void handle_focus_in(XFocusChangeEvent* event) {
+  Window win = event->window;
+  XSetWindowBorder(dsp, win, red.pixel);
+  info("focus in for window %d", win);
+}
+
+void handle_focus_out(XFocusChangeEvent* event) {
+  Window win = event->window;
+  XSetWindowBorder(dsp, win, grey.pixel);
+  info("focus out for window %d", win);
 }
 
 int main(int argc, char** argv) {
@@ -105,6 +121,7 @@ int main(int argc, char** argv) {
 
   XColor col;
   Status st;
+
   col.red = 65535;
   col.green = 0;
   col.blue = 0;
@@ -113,6 +130,15 @@ int main(int argc, char** argv) {
     fatal("could not allocate colour");
   }
   red = col;
+
+  col.red = 1000;
+  col.green = 1000;
+  col.blue = 1000;
+  st = XAllocColor(dsp, cm, &col);
+  if (!st) {
+    fatal("could not allocate colour");
+  }
+  grey = col;
 
   Window retroot, retparent;
   Window* children;
@@ -152,6 +178,12 @@ int main(int argc, char** argv) {
       break;
     case MotionNotify:
       handle_motion((XMotionEvent*)&event.xmotion);
+      break;
+    case FocusIn:
+      handle_focus_in((XFocusChangeEvent*)&event.xfocus);
+      break;
+    case FocusOut:
+      handle_focus_out((XFocusChangeEvent*)&event.xfocus);
       break;
     }
   }
