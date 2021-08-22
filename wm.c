@@ -25,6 +25,13 @@ void msg(char* msg, ...) {
 Display* dsp;
 XColor red;
 
+void manage_new_window(Window win) {
+  msg("learned about new window: %d", win);
+  XSetWindowBorderWidth(dsp, win, 3);
+  XSetWindowBorder(dsp, win, red.pixel);
+  XSelectInput(dsp, win, EnterWindowMask);
+}
+
 void handle_create_notify(XCreateWindowEvent* event) {
   Window win = event->window;
   msg("create notify for window: %d", win);
@@ -33,18 +40,21 @@ void handle_create_notify(XCreateWindowEvent* event) {
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
   msg("map request for window: %d", win);
-
-  // todo why can't i style on create notify?
-  XSetWindowBorderWidth(dsp, win, 3);
-  XSetWindowBorder(dsp, win, red.pixel);
-
+  manage_new_window(win);
   XMapWindow(dsp, win);
+}
+
+void handle_enter_notify(XCrossingEvent* event) {
+  Window win = event->window;
+  long t = event->time;
+  msg("focus change on enter-notify to window %d", win);
+  XSetInputFocus(dsp, win, RevertToParent, t);
 }
 
 int main(int argc, char** argv) {
   dsp = XOpenDisplay(NULL);
   if (!dsp) {
-    fatal("could not open display");
+     fatal("could not open display");
   }
 
   Window root = XDefaultRootWindow(dsp);
@@ -68,6 +78,17 @@ int main(int argc, char** argv) {
   }
   red = col;
 
+  Window retroot, retparent;
+  Window* children;
+  unsigned int count;
+  st = XQueryTree(dsp, root, &retroot, &retparent, &children, &count);
+  if (!st) {
+    fatal("couldn't query initial window list");
+  }
+  for (int i = 0; i < count; i++) {
+    manage_new_window(children[i]);
+  }
+
   XSelectInput(dsp, root, SubstructureRedirectMask);
 
   for (;;) {
@@ -80,6 +101,9 @@ int main(int argc, char** argv) {
       break;
     case MapRequest:
       handle_map_request((XMapRequestEvent*)&event);
+      break;
+    case EnterNotify:
+      handle_enter_notify((XCrossingEvent*)&event);
       break;
     }
   }
