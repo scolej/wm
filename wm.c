@@ -30,11 +30,7 @@ void manage_new_window(Window win) {
   XSetWindowBorderWidth(dsp, win, 3);
   XSetWindowBorder(dsp, win, red.pixel);
   XSelectInput(dsp, win, EnterWindowMask);
-}
-
-void handle_create_notify(XCreateWindowEvent* event) {
-  Window win = event->window;
-  msg("create notify for window: %d", win);
+  // todo is it necessary to repeat this on every map?
 }
 
 void handle_map_request(XMapRequestEvent* event) {
@@ -49,6 +45,46 @@ void handle_enter_notify(XCrossingEvent* event) {
   long t = event->time;
   msg("focus change on enter-notify to window %d", win);
   XSetInputFocus(dsp, win, RevertToParent, t);
+}
+
+struct {
+  Window win;
+  int start_mouse_x;
+  int start_mouse_y;
+  int start_win_x;
+  int start_win_y;
+} drag_state;
+
+void handle_button_press(XButtonEvent* event) {
+  Window win = event->subwindow;
+  msg("started dragging window %d", win);
+
+  int x = event->x_root;
+  int y = event->y_root;
+  drag_state.win = win;
+  drag_state.start_mouse_x = x;
+  drag_state.start_mouse_y = y;
+
+  XWindowAttributes attr;
+  XGetWindowAttributes(dsp, win, &attr);
+  drag_state.start_win_x = attr.x;
+  drag_state.start_win_y = attr.y;
+}
+
+void handle_button_release(XButtonEvent* event) {
+  msg("finish drag");
+  drag_state.win = 0;
+}
+
+void handle_motion(XMotionEvent* event) {
+  if (drag_state.win == 0) {
+    return;
+  }
+
+  int x = event->x_root - drag_state.start_mouse_x + drag_state.start_win_x;
+  int y = event->y_root - drag_state.start_mouse_y + drag_state.start_win_y;
+  msg("dragging window %d to %d %d", drag_state.win, x, y);
+  XMoveWindow(dsp, drag_state.win, x, y);
 }
 
 int main(int argc, char** argv) {
@@ -89,6 +125,12 @@ int main(int argc, char** argv) {
     manage_new_window(children[i]);
   }
 
+  drag_state.win = 0;
+
+  XGrabButton(dsp, 1, Mod4Mask, root, False,
+              ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
+              GrabModeAsync, GrabModeAsync, None, None);
+
   XSelectInput(dsp, root, SubstructureRedirectMask);
 
   for (;;) {
@@ -96,14 +138,20 @@ int main(int argc, char** argv) {
     XNextEvent(dsp, &event);
 
     switch (event.type) {
-    case CreateNotify:
-      handle_create_notify((XCreateWindowEvent*)&event);
-      break;
     case MapRequest:
-      handle_map_request((XMapRequestEvent*)&event);
+      handle_map_request((XMapRequestEvent*)&event.xmaprequest);
       break;
     case EnterNotify:
-      handle_enter_notify((XCrossingEvent*)&event);
+      handle_enter_notify((XCrossingEvent*)&event.xcrossing);
+      break;
+    case ButtonPress:
+      handle_button_press((XButtonEvent*)&event.xbutton);
+      break;
+    case ButtonRelease:
+      handle_button_release((XButtonEvent*)&event.xbutton);
+      break;
+    case MotionNotify:
+      handle_motion((XMotionEvent*)&event.xmotion);
       break;
     }
   }
