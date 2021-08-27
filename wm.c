@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <assert.h>
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -22,8 +23,70 @@ void info(char* msg, ...) {
   fflush(stdout);
 }
 
+// todo
+void warn(char* msg, ...) {
+  va_list args;
+  va_start(args, msg);
+  vprintf(msg, args);
+  va_end(args);
+  printf("\n");
+  fflush(stdout);
+}
+
 void fine(char* msg, ...) {
   // todo
+}
+
+typedef struct {
+  Window win;
+  int x, y, w, h;
+} Client;
+// todo
+// last focus time
+
+// Fixed number of clients. Could be better; should be fine.
+#define MAX_CLIENTS 1000
+Client clients[MAX_CLIENTS];
+int last_client_index = -1;
+
+void clients_init() {
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    clients[i].win = -1;
+  }
+}
+
+// todo i'm sure using -1 as an 'empty signifier' is a bad idea
+
+// Finds the next free slot.
+Client* clients_next() {
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    Client* c = &clients[i];
+    if (c->win == -1) {
+       last_client_index = i > last_client_index ? i : last_client_index;
+       return c;
+    }
+  }
+  return NULL;
+}
+
+void clients_remove(Window w) {
+  for (int i = 0; i < last_client_index; i++) {
+    Client* c = &clients[i];
+    if (c->win == w) {
+      c->win = -1;
+      last_client_index = i > last_client_index ? i : last_client_index;
+      return;
+    }
+  }
+}
+
+Client* clients_find(Window w) {
+  for (int i = 0; i < last_client_index; i++) {
+    if (clients[i].win == w) {
+      return &clients[i];
+    }
+  }
+  return NULL;
 }
 
 // todo pass around a context?
@@ -31,11 +94,25 @@ Display* dsp;
 XColor red, grey;
 
 void manage_new_window(Window win) {
-  info("learned about new window: %d", win);
+  Client* c = clients_next();
+  if (!c) {
+    warn("too many clients, ignoring new window: %d", win);
+    return;
+  }
+
+  // Init new client
+  c->win = win;
+  c->x = -1;
+  c->y = -1;
+  c->w = -1;
+  c->h = -1;
+
   XSetWindowBorderWidth(dsp, win, 3);
   XSetWindowBorder(dsp, win, grey.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
   // todo is it necessary to repeat this on every map?
+
+  info("learned about new window: %d", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
@@ -166,7 +243,11 @@ void handle_motion(XMotionEvent* event) {
   int dx = ex - sx;
   int dy = ey - sy;
 
-  // todo maybe this switch would be better over at drag start
+  // Determine how the mouse delta will impact the size and position of the
+  // window.
+  //
+  // xp, yp   position
+  // xw, yw   size
   int xp, xw, yp, yw;
   switch (drag_state.kind) {
   case MOVE:
@@ -244,6 +325,26 @@ void handle_focus_out(XFocusChangeEvent* event) {
   info("focus out for window %d", win);
 }
 
+void handle_configure(XConfigureEvent* event) {
+  Window win = event->window;
+  Client* c = clients_find(win);
+  if (!c) {
+    warn("we have no client for window %d", win);
+    return;
+  }
+  c->x = event->x;
+  c->y = event->y;
+  c->w = event->width;
+  c->h = event->height;
+}
+
+void handle_destroy(XDestroyWindowEvent* event) {
+  Window win = event->window;
+  clients_remove(win);
+  info("destroyed window %d", win);
+}
+
+
 int main(int argc, char** argv) {
   dsp = XOpenDisplay(NULL);
   if (!dsp) {
@@ -281,6 +382,8 @@ int main(int argc, char** argv) {
   }
   grey = col;
 
+  clients_init();
+
   Window retroot, retparent;
   Window* children;
   unsigned int count;
@@ -291,10 +394,11 @@ int main(int argc, char** argv) {
   for (int i = 0; i < count; i++) {
     manage_new_window(children[i]);
   }
+  XFree(children);
 
   drag_state.win = 0;
 
-  XGrabButton(dsp, 1, Mod4Mask, root, False,
+  XGrabButton(dsp, 1, Mod1Mask, root, False,
               ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
               GrabModeAsync, GrabModeAsync, None, None);
 
@@ -325,6 +429,12 @@ int main(int argc, char** argv) {
       break;
     case FocusOut:
       handle_focus_out((XFocusChangeEvent*)&event.xfocus);
+      break;
+    case ConfigureNotify:
+      handle_configure((XConfigureEvent*)&event.xconfigure);
+      break;
+    case DestroyNotify:
+      handle_destroy((XDestroyWindowEvent*)&event.xdestroywindow);
       break;
     }
   }
