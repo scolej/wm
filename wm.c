@@ -44,6 +44,8 @@ typedef struct {
 // todo
 // last focus time
 
+#define BORDER_WIDTH 3
+
 // Fixed number of clients. Could be better; should be fine.
 #define MAX_CLIENTS 1000
 Client clients[MAX_CLIENTS];
@@ -69,19 +71,32 @@ Client* clients_next() {
   return NULL;
 }
 
+unsigned int clients_count() {
+  int i = 0;
+  while (i <= last_client_index) {
+    if (clients[i].win == -1) {
+      continue;
+    }
+    i++;
+  }
+  return i;
+}
+
 void clients_remove(Window w) {
-  for (int i = 0; i < last_client_index; i++) {
+  for (int i = 0; i <= last_client_index; i++) {
     Client* c = &clients[i];
     if (c->win == w) {
       c->win = -1;
-      last_client_index = i > last_client_index ? i : last_client_index;
+      if (i == last_client_index) {
+        last_client_index--;
+      }
       return;
     }
   }
 }
 
 Client* clients_find(Window w) {
-  for (int i = 0; i < last_client_index; i++) {
+  for (int i = 0; i <= last_client_index; i++) {
     if (clients[i].win == w) {
       return &clients[i];
     }
@@ -107,7 +122,7 @@ void manage_new_window(Window win) {
   c->w = -1;
   c->h = -1;
 
-  XSetWindowBorderWidth(dsp, win, 3);
+  XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
   XSetWindowBorder(dsp, win, grey.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
   // todo is it necessary to repeat this on every map?
@@ -219,11 +234,64 @@ void handle_button_press(XButtonEvent* event) {
   drag_state.kind = dk;
 
   info("started dragging window %d", win);
+
+  XRaiseWindow(dsp, win);
 }
 
 void handle_button_release(XButtonEvent* event) {
   info("finish drag");
   drag_state.win = 0;
+}
+
+// Assign the given pointers to lists of x and y snap values. That is:
+// window and screen edges.
+//
+// Caller must free the lists after use.
+int build_snap_lists(int** xsnaps, int** ysnaps, Window ignore_win) {
+  int nc = clients_count() - 1;
+  int n = nc * 2 + 2;
+  int* xs = malloc(sizeof(int) * n);
+  int* ys = malloc(sizeof(int) * n);
+
+  // Screen edges
+  // todo
+  xs[0] = 0;
+  xs[1] = 500;
+  ys[0] = 0;
+  ys[1] = 500;
+
+  int ii = 2;
+
+  for (int i = 0; i <= last_client_index; i++) {
+    Client* c = &clients[i];
+    // fixme this is crap
+    if (c->win == -1 || c->win == ignore_win) {
+      continue;
+    }
+
+    xs[ii] = c->x - BORDER_WIDTH;
+    xs[ii + 1] = c->x + c->w + BORDER_WIDTH;
+    ys[ii] = c->y - BORDER_WIDTH;
+    ys[ii + 1] = c->y + c->h + BORDER_WIDTH;
+    ii += 2;
+  }
+
+  assert(ii == n);
+
+  *xsnaps = xs;
+  *ysnaps = ys;
+  return n;
+}
+
+void snap(int* l, int* snaps, int n) {
+  int x = *l;
+  for (int i = 0; i < n; i++) {
+    int s = snaps[i];
+    if (abs(x - s) < 30) {
+      *l = s;
+      return;
+    }
+  }
 }
 
 void handle_motion(XMotionEvent* event) {
@@ -310,7 +378,22 @@ void handle_motion(XMotionEvent* event) {
   int y = wy + yp * dy;
   int w = ww + xw * dx;
   int h = wh + yw * dy;
-  XMoveResizeWindow(dsp, drag_state.win, x, y, w, h);
+
+  int l = x;
+  int r = x + w;
+  int t = y;
+  int b = y + h;
+  int* xsnaps;
+  int* ysnaps;
+  int n = build_snap_lists(&xsnaps, &ysnaps, drag_state.win);
+  snap(&l, xsnaps, n);
+  snap(&r, xsnaps, n);
+  snap(&t, ysnaps, n);
+  snap(&b, ysnaps, n);
+  free(xsnaps);
+  free(ysnaps);
+
+  XMoveResizeWindow(dsp, drag_state.win, l, t, r - l, b - t);
 }
 
 void handle_focus_in(XFocusChangeEvent* event) {
@@ -327,15 +410,20 @@ void handle_focus_out(XFocusChangeEvent* event) {
 
 void handle_configure(XConfigureEvent* event) {
   Window win = event->window;
+  int x = event->x;
+  int y = event->y;
+  int w = event->width;
+  int h = event->height;
   Client* c = clients_find(win);
   if (!c) {
     warn("we have no client for window %d", win);
     return;
   }
-  c->x = event->x;
-  c->y = event->y;
-  c->w = event->width;
-  c->h = event->height;
+  c->x = x;
+  c->y = y;
+  c->w = w;
+  c->h = h;
+  info("new position for window %d is [%d %d %d %d]", win, x, y, w, h);
 }
 
 void handle_destroy(XDestroyWindowEvent* event) {
@@ -373,9 +461,9 @@ int main(int argc, char** argv) {
   }
   red = col;
 
-  col.red = 1000;
-  col.green = 1000;
-  col.blue = 1000;
+  col.red = 30000;
+  col.green = 30000;
+  col.blue = 30000;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
     fatal("could not allocate colour");
@@ -402,7 +490,7 @@ int main(int argc, char** argv) {
               ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
               GrabModeAsync, GrabModeAsync, None, None);
 
-  XSelectInput(dsp, root, SubstructureRedirectMask);
+  XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
   for (;;) {
     XEvent event;
