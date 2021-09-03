@@ -16,7 +16,7 @@ wmpid=$!
 
 st &
 st &
-st &
+# st &
 
 wait $wmpid
 

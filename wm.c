@@ -4,9 +4,13 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#include "iter.h"
-
 #define BORDER_WIDTH 3
+
+// Fixed number of clients. Could be better; should be fine.
+#define MAX_CLIENTS 1000
+
+#define POINTER_SCRATCH_SIZE MAX_CLIENTS
+#define POINTER_SCRATCH_STACK_SIZE 10
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -45,10 +49,6 @@ typedef struct {
   int x, y, w, h;
 } Rectangle;
 
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
-
 typedef struct {
   Window win;
   Rectangle bounds;
@@ -56,9 +56,6 @@ typedef struct {
 // todo
 // last focus time
 
-
-// Fixed number of clients. Could be better; should be fine.
-#define MAX_CLIENTS 1000
 Client clients[MAX_CLIENTS];
 int last_client_index = -1;
 
@@ -99,20 +96,21 @@ void clients_remove(Window w) {
 Client* clients_find(Window w) {
   for (int i = 0; i <= last_client_index; i++) {
     if (clients[i].win == w) {
+      info("found client for window %d at index %d", w, i);
       return &clients[i];
     }
   }
   return NULL;
 }
 
-// Starting from client at index I, find the next defined client. If found,
-// a pointer is returned and the index of the relevant client is written
-// into RET.
-Client* clients_next(int i, int* ret) {
+// Starting from client at given index, find the next defined client.
+Client* clients_next(int* first) {
+  int i = *first + 1;
+  info("looking for clients starting from %d", i);
   while (i <= last_client_index) {
     Client* c = &clients[i];
     if (c->win != -1) {
-      *ret = i;
+      *first = i;
       return c;
     }
     i++;
@@ -121,14 +119,13 @@ Client* clients_next(int i, int* ret) {
 }
 
 unsigned int clients_count() {
-  int i = 0;
-  while (clients_next(i, &i));
-  return i;
+  info("counting clients");
+  int i = -1;
+  while (clients_next(&i));
+  int n = i + 1;
+  info("there are %d clients", n);
+  return n;
 }
-
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
 
 // todo pass around a context?
 Display* dsp;
@@ -153,7 +150,7 @@ void manage_new_window(Window win) {
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
   // todo is it necessary to repeat this on every map?
 
-  info("learned about new window: %d", win);
+  info("new window: %d", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
@@ -269,101 +266,108 @@ void handle_button_release(XButtonEvent* event) {
   drag_state.win = 0;
 }
 
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
+// snap the first rectangle to the second rectangle
+int snap(Rectangle* a, Rectangle* b) {
+  // snap distance
+  static int s = 30;
 
-void* iter_clients_next(Iter* iter) {
-  int* n = (int*)iter->data;
-  return clients_next(*n, n);
-}
+  // count how many snaps we perform
+  int c = 0;
 
-Iter iter_clients() {
-  // todo just pack the int into pointer?
-  int* i = malloc(sizeof i);
-  *i = 0;
-  Iter iter;
-  iter.data = i;
-  iter.next = iter_clients_next;
-  return iter;
-}
+  int al = a->x;
+  int ar = al + a->w - 1;
+  int at = a->y;
+  int ab = at + a->h - 1;
 
-void iter_clients_free(Iter* iter) {
-  free(iter->data);
-}
+  int bl = b->x;
+  int br = bl + b->w - 1;
+  int bt = b->y;
+  int bb = bt + b->h - 1;
 
-///
+  int tmp;
 
-void* iter_client_bounds_next(Iter* iter) {
-  int* n = (int*)iter->data;
-  Client* c = clients_next(*n, n);
-  if (c) {
-    return &c->bounds;
+  int nl = al;
+  int nr = ar;
+  int nt = at;
+  int nb = ab;
+
+  // left
+  tmp = br + 1 + BORDER_WIDTH * 2;
+  if (abs(al - bl) < s) {
+    nl = bl;
+    c++;
+  } else if (abs(al - tmp) < s) {
+    nl = tmp;
+    c++;
   }
-  return NULL;
-}
 
-Iter iter_client_bounds() {
-  int* i = malloc(sizeof i);
-  *i = 0;
-  Iter iter;
-  iter.data = i;
-  iter.next = iter_client_bounds_next;
-  return iter;
-}
+  // right
+  tmp = bl - 1 - BORDER_WIDTH * 2;
+  if (abs(ar - br) < s) {
+    nr = br;
+    c++;
+  } else if (abs(ar - tmp) < s) {
+    nr = tmp;
+    c++;
+  }
 
-void iter_client_bounds_free(Iter* iter) {
-  free(iter->data);
-}
+  // bottom
+  tmp = bt - 1 - BORDER_WIDTH * 2;
+  if (abs(ab - bb) < s) {
+    nb = bb;
+    c++;
+  } else if (abs(ab - tmp) < s) {
+    nb = tmp;
+    c++;
+  }
 
-///
+  // top
+  tmp = bb + 1 + BORDER_WIDTH * 2;
+  if (abs(at - bt) < s) {
+    nt = bt;
+    c++;
+  } else if (abs(at - tmp) < s) {
+    nt = tmp;
+    c++;
+  }
 
-struct SkippingClients {
-  // where we're up to
-  int i;
-  // client to skip
-  Client* skip;
-};
+  a->x = nl;
+  a->y = nt;
+  a->w = nr - nl + 1;
+  a->h = nb - nt + 1;
 
-void* iter_clients_skip_next(Iter* i) {
-  struct SkippingClients *s = i->data;
-  Client *c;
-  do {
-    c = clients_next(s->i, &s->i);
-  } while (c && c != s->skip);
   return c;
 }
 
-Iter iter_clients_skip(Client* c) {
-  struct SkippingClients *skip = malloc(sizeof skip);
-  skip->i = 0;
-  skip->skip = c;
-
-  Iter iter;
-  iter.data = &skip;
-  iter.next = iter_clients_skip_next;
-  return iter;
-}
-
-void iter_clients_skip_free(Iter* i) {
-  free(i->data);
-}
-
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
-//////////////////////////////////////////////////
-
-int snap(Rectangle* rect, Rectangle* to) {
-
-}
-
-void snap_rects(Rectangle* rect, Iter* snaps) {
-  Rectangle* r;
-  while ((r = iter_next(snaps))) { // fixme assignment truth value?
-    if (snap(rect, r)) {
-      return;
-    }
+void snap_rects(Rectangle* rect, Rectangle* snaps, int nsnaps) {
+  for (int i = 0; i < nsnaps; i++) {
+    snap(rect, &snaps[i]);
   }
+}
+
+Rectangle** make_snap_list(Client* skip, int* ret) {
+  info("making snap list");
+
+  int nc = clients_count();
+  int n = nc - 1;
+  *ret = n;
+
+  Rectangle** snaps = malloc(n * sizeof snaps);
+
+  int count = 0;
+  int cn = -1;
+  Client* c;
+  while ((c = clients_next(&cn))) {
+    if (skip == c) {
+      continue;
+    }
+    snaps[count] = &c->bounds;
+    count++;
+  }
+  assert(count == n);
+
+  info("built snap list with %d elements", n);
+  return snaps;
 }
 
 void handle_motion(XMotionEvent* event) {
@@ -452,11 +456,19 @@ void handle_motion(XMotionEvent* event) {
   r.w = ww + xw * dx;
   r.h = wh + yw * dy;
 
-  Iter iter = iter_client_bounds();
-  snap_rects(&r, &iter);
-  iter_client_bounds_free(&iter);
+  Window win = drag_state.win;
+  Client* c = clients_find(win);
+  if (!c) {
+    info("no client for: %d", win);
+  }
 
-  XMoveResizeWindow(dsp, drag_state.win, r.x, r.y, r.w, r.h);
+  int n;
+  Rectangle** snaps = make_snap_list(c, &n);
+
+  snap_rects(&r, *snaps, n);
+  free(snaps);
+
+  XMoveResizeWindow(dsp, win, r.x, r.y, r.w, r.h);
 }
 
 void handle_focus_in(XFocusChangeEvent* event) {
