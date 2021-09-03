@@ -1,9 +1,12 @@
-flags=-Wall -std=c99 -g
+flags=-Wall -std=c99 -g -Werror
 cc=gcc
 
-all : wm
+all : wm test
 
 wm : wm.c
+	$(cc) $(flags) -lX11 -o $@ $^
+
+test : test_buffer.c buffer.c
 	$(cc) $(flags) -lX11 -o $@ $^
 
 check-syntax :
