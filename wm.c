@@ -457,12 +457,21 @@ void handle_destroy(XDestroyWindowEvent* event) {
   info("destroyed window %d", win);
 }
 
+int error_handler(Display *dsp, XErrorEvent *event) {
+  warn("--- X error ---");
+  char buffer[128];
+  XGetErrorText(dsp, event->error_code, buffer, 128);
+  warn("%d %d %s", event->request_code, event->minor_code, buffer);
+  return 0;
+}
 
 int main(int argc, char** argv) {
   dsp = XOpenDisplay(NULL);
   if (!dsp) {
      fatal("could not open display");
   }
+
+  XSetErrorHandler(error_handler);
 
   Window root = XDefaultRootWindow(dsp);
   if (!root) {
