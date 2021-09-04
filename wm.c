@@ -8,6 +8,8 @@
 
 #define BORDER_WIDTH 2
 #define BORDER_GAP 3
+#define MODMASK Mod1Mask
+// todo screen gap
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -158,77 +160,88 @@ void handle_button_press(XButtonEvent* event) {
   int x = event->x_root;
   int y = event->y_root;
 
-  XWindowAttributes attr;
-  XGetWindowAttributes(dsp, win, &attr);
-  int win_x = attr.x;
-  int win_y = attr.y;
-  int win_w = attr.width;
-  int win_h = attr.height;
+  if (event->button == 1) {
+    // fixme used cached values
+    XWindowAttributes attr;
+    XGetWindowAttributes(dsp, win, &attr);
+    int win_x = attr.x;
+    int win_y = attr.y;
+    int win_w = attr.width;
+    int win_h = attr.height;
 
-  float r = 0.1;
-  int x1, x2, y1, y2;
-  x1 = win_x + win_w * r;
-  x2 = win_x + win_w * (1.0 - r);
-  y1 = win_y + win_h * r;
-  y2 = win_y + win_h * (1.0 - r);
-  info("drag thresholds are %d %d and %d %d", x1, x2, y1, y2);
+    float r = 0.1;
+    int x1, x2, y1, y2;
+    x1 = win_x + win_w * r;
+    x2 = win_x + win_w * (1.0 - r);
+    y1 = win_y + win_h * r;
+    y2 = win_y + win_h * (1.0 - r);
+    info("drag thresholds are %d %d and %d %d", x1, x2, y1, y2);
 
-  enum DragHandle dhx;
-  if (x < x1) {
-    dhx = LOW;
-  } else if (x < x2) {
-    dhx = MIDDLE;
-  } else {
-    dhx = HIGH;
+    enum DragHandle dhx;
+    if (x < x1) {
+      dhx = LOW;
+    } else if (x < x2) {
+      dhx = MIDDLE;
+    } else {
+      dhx = HIGH;
+    }
+
+    enum DragHandle dhy;
+    if (y < y1) {
+      dhy = LOW;
+    } else if (y < y2) {
+      dhy = MIDDLE;
+    } else {
+      dhy = HIGH;
+    }
+
+    enum DragKind dk;
+    if (dhx == LOW && dhy == MIDDLE) {
+      dk = RESIZE_W;
+    } else if (dhx == HIGH && dhy == MIDDLE) {
+      dk = RESIZE_E;
+    } else if (dhx == MIDDLE && dhy == LOW) {
+      dk = RESIZE_N;
+    } else if (dhx == MIDDLE && dhy == HIGH) {
+      dk = RESIZE_S;
+    } else if (dhx == LOW && dhy == LOW) {
+      dk = RESIZE_NW;
+    } else if (dhx == HIGH && dhy == LOW) {
+      dk = RESIZE_NE;
+    } else if (dhx == LOW && dhy == HIGH) {
+      dk = RESIZE_SW;
+    } else if (dhx == HIGH && dhy == HIGH) {
+      dk = RESIZE_SE;
+    } else {
+      dk = MOVE;
+    }
+
+    drag_state.win = win;
+    drag_state.start_win_x = win_x;
+    drag_state.start_win_y = win_y;
+    drag_state.start_win_w = win_w;
+    drag_state.start_win_h = win_h;
+    drag_state.start_mouse_x = x;
+    drag_state.start_mouse_y = y;
+    drag_state.kind = dk;
+
+    info("started dragging window %d", win);
+
+    XRaiseWindow(dsp, win);
   }
-
-  enum DragHandle dhy;
-  if (y < y1) {
-    dhy = LOW;
-  } else if (y < y2) {
-    dhy = MIDDLE;
-  } else {
-    dhy = HIGH;
-  }
-
-  enum DragKind dk;
-  if (dhx == LOW && dhy == MIDDLE) {
-    dk = RESIZE_W;
-  } else if (dhx == HIGH && dhy == MIDDLE) {
-    dk = RESIZE_E;
-  } else if (dhx == MIDDLE && dhy == LOW) {
-    dk = RESIZE_N;
-  } else if (dhx == MIDDLE && dhy == HIGH) {
-    dk = RESIZE_S;
-  } else if (dhx == LOW && dhy == LOW) {
-    dk = RESIZE_NW;
-  } else if (dhx == HIGH && dhy == LOW) {
-    dk = RESIZE_NE;
-  } else if (dhx == LOW && dhy == HIGH) {
-    dk = RESIZE_SW;
-  } else if (dhx == HIGH && dhy == HIGH) {
-    dk = RESIZE_SE;
-  } else {
-    dk = MOVE;
-  }
-
-  drag_state.win = win;
-  drag_state.start_win_x = win_x;
-  drag_state.start_win_y = win_y;
-  drag_state.start_win_w = win_w;
-  drag_state.start_win_h = win_h;
-  drag_state.start_mouse_x = x;
-  drag_state.start_mouse_y = y;
-  drag_state.kind = dk;
-
-  info("started dragging window %d", win);
-
-  XRaiseWindow(dsp, win);
 }
 
 void handle_button_release(XButtonEvent* event) {
-  info("finish drag");
-  drag_state.win = 0;
+  if (event->button == 1) {
+    if (drag_state.win) {
+      info("finish drag");
+      drag_state.win = 0;
+    }
+  } else if (event->button == 3) {
+    Window win = event->subwindow;
+    info("lowering window: %d", win);
+    XLowerWindow(dsp, win);
+  }
 }
 
 // Make snap lists for edges: lefts, rights, tops, bottoms. These are the
@@ -493,7 +506,7 @@ int main(int argc, char** argv) {
 
   drag_state.win = 0;
 
-  XGrabButton(dsp, 1, Mod1Mask, root, False,
+  XGrabButton(dsp, AnyButton, MODMASK, root, False,
               ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
               GrabModeAsync, GrabModeAsync, None, None);
 
