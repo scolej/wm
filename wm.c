@@ -1,16 +1,13 @@
+#include "buffer.h"
+#include "snap.h"
 #include <X11/Xlib.h>
+#include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
-
-#include "snap.h"
 
 #define BORDER_WIDTH 2
 #define BORDER_GAP 3
-
-// Fixed number of clients. Could be better; should be fine.
-#define MAX_CLIENTS 1000
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -62,75 +59,29 @@ typedef struct {
 // todo
 // last focus time
 
-Client clients[MAX_CLIENTS];
-int last_client_index = -1;
+Buffer clients;
 
-void clients_init() {
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    clients[i].win = -1;
-  }
-}
-
-// todo i'm sure using -1 as an 'empty signifier' is a bad idea
-
-// Finds the next free slot.
-Client* clients_next_available() {
-  for (int i = 0; i < MAX_CLIENTS; i++) {
-    Client* c = &clients[i];
-    if (c->win == -1) {
-       last_client_index = i > last_client_index ? i : last_client_index;
-       return c;
-    }
-  }
-  return NULL;
-}
-
-void clients_remove(Window w) {
-  for (int i = 0; i <= last_client_index; i++) {
-    Client* c = &clients[i];
-    if (c->win == w) {
-      c->win = -1;
-      if (i == last_client_index) {
-        last_client_index--;
-      }
-      return;
-    }
-  }
-}
+// Pair of pointer and array index.
+// todo smell?
+typedef struct {
+  void* data;
+  unsigned int index;
+} PI;
 
 // Finds a client by the window it represents.
-Client* clients_find(Window w) {
-  for (int i = 0; i <= last_client_index; i++) {
-    if (clients[i].win == w) {
-      info("found client for window %d at index %d", w, i);
-      return &clients[i];
+PI clients_find(Window w) {
+  PI p;
+  p.data = NULL;
+  p.index = 0;
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    if (c->win == w) {
+      fine("found client for window %d at index %d", w, i);
+      p.data = c;
+      p.index = i;
     }
   }
-  return NULL;
-}
-
-// Starting from client at given index, find the next defined client.
-Client* clients_next(int* first) {
-  int i = *first + 1;
-  info("looking for clients starting from %d", i);
-  while (i <= last_client_index) {
-    Client* c = &clients[i];
-    if (c->win != -1) {
-      *first = i;
-      return c;
-    }
-    i++;
-  }
-  return NULL;
-}
-
-unsigned int clients_count() {
-  info("counting clients");
-  int i = -1;
-  while (clients_next(&i));
-  int n = i + 1;
-  info("there are %d clients", n);
-  return n;
+  return p;
 }
 
 // todo pass around a context?
@@ -139,35 +90,32 @@ XColor red, grey;
 unsigned int screen_width, screen_height;
 
 void manage_new_window(Window win) {
-  Client* c = clients_next_available();
-  if (!c) {
-    warn("too many clients, ignoring new window: %d", win);
-    return;
-  }
-
-  c->win = win;
+  Client c;
+  c.win = win;
 
   Status st;
   XWindowAttributes attr;
   st = XGetWindowAttributes(dsp, win, &attr);
   if (st) {
-    c->bounds.x = attr.x;
-    c->bounds.y = attr.y;
-    c->bounds.w = attr.width;
-    c->bounds.h = attr.height;
+    c.bounds.x = attr.x;
+    c.bounds.y = attr.y;
+    c.bounds.w = attr.width;
+    c.bounds.h = attr.height;
   } else {
     warn("failed to get initial window attributes for %d", win);
-    c->bounds.x = -1;
-    c->bounds.y = -1;
-    c->bounds.w = -1;
-    c->bounds.h = -1;
+    c.bounds.x = -1;
+    c.bounds.y = -1;
+    c.bounds.w = -1;
+    c.bounds.h = -1;
   }
+
+  buffer_add(&clients, &c);
 
   XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
   XSetWindowBorder(dsp, win, grey.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
 
-  fine("new window: %d", win);
+  fine("added new window: %d", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
@@ -288,7 +236,7 @@ void handle_button_release(XButtonEvent* event) {
 // lefts needs to be freed by the caller. The other pointers share this
 // same memory. Returns the number of elements in each list.
 unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** bs) {
-  unsigned int nc = clients_count() - 1;
+  unsigned int nc = clients.length - 1;
   // 2 edges per client, 1 edge for the screen
   unsigned int edges = nc * 2 + 1;
   unsigned int cells = edges * 4;
@@ -300,9 +248,8 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
 
   unsigned int gap = BORDER_WIDTH * 2 + BORDER_GAP;
   unsigned int count = 0;
-  int ci = -1;
-  Client* c;
-  while ((c = clients_next(&ci))) {
+  for (unsigned int ci = 0; ci < clients.length; ci++) {
+    Client* c = buffer_get(&clients, ci);
     if (skip == c) {
       continue;
     }
@@ -421,7 +368,7 @@ void handle_motion(XMotionEvent* event) {
   rect.h = wh + yw * dy;
 
   Window win = drag_state.win;
-  Client* c = clients_find(win);
+  Client *c = clients_find(win).data;
   if (!c) {
     info("no client for: %d", win);
   }
@@ -455,7 +402,7 @@ void handle_configure(XConfigureEvent* event) {
   int y = event->y;
   int w = event->width;
   int h = event->height;
-  Client* c = clients_find(win);
+  Client* c = clients_find(win).data;
   if (!c) {
     warn("we have no client for window %d", win);
     return;
@@ -464,13 +411,18 @@ void handle_configure(XConfigureEvent* event) {
   c->bounds.y = y;
   c->bounds.w = w;
   c->bounds.h = h;
-  info("new position for window %d is [%d %d %d %d]", win, x, y, w, h);
+  fine("new position for window %d is [%d %d %d %d]", win, x, y, w, h);
 }
 
 void handle_destroy(XDestroyWindowEvent* event) {
   Window win = event->window;
-  clients_remove(win);
-  info("destroyed window %d", win);
+  PI p = clients_find(win);
+  if (!p.data) {
+    warn("no client for window: %d", win);
+    return;
+  }
+  buffer_remove(&clients, p.index);
+  fine("destroyed window %d", win);
 }
 
 int error_handler(Display *dsp, XErrorEvent *event) {
@@ -525,7 +477,7 @@ int main(int argc, char** argv) {
   }
   grey = col;
 
-  clients_init();
+  buffer_init(&clients, 500, sizeof(Client));
 
   Window retroot, retparent;
   Window* children;

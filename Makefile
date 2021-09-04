@@ -5,7 +5,7 @@ all : wm test
 
 test : test_buffer test_snap
 
-wm : wm.c snap.c
+wm : wm.c snap.c buffer.c
 	$(cc) $(flags) -lX11 -o $@ $^
 
 test_buffer : test_buffer.c buffer.c
