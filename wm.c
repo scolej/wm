@@ -4,13 +4,13 @@
 #include <stdlib.h>
 #include <assert.h>
 
-#define BORDER_WIDTH 3
+#include "snap.h"
+
+#define BORDER_WIDTH 2
+#define BORDER_GAP 3
 
 // Fixed number of clients. Could be better; should be fine.
 #define MAX_CLIENTS 1000
-
-#define POINTER_SCRATCH_SIZE MAX_CLIENTS
-#define POINTER_SCRATCH_STACK_SIZE 10
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -266,108 +266,55 @@ void handle_button_release(XButtonEvent* event) {
   drag_state.win = 0;
 }
 
-// snap the first rectangle to the second rectangle
-int snap(Rectangle* a, Rectangle* b) {
-  // snap distance
-  static int s = 30;
+// Make snap lists for edges: lefts, rights, tops, bottoms. These are the
+// values for each edge which we can snap to. The pointer written into
+// lefts needs to be freed by the caller. The other pointers share this
+// same memory. Returns the number of elements in each list.
+unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** bs) {
+  unsigned int nc = clients_count() - 1;
+  // 2 edges per client, 1 edge for the screen
+  unsigned int edges = nc * 2 + 1;
+  unsigned int cells = edges * 4;
+  int* mem = malloc(sizeof(int) * cells);
+  *ls = mem;
+  *rs = mem + edges;
+  *ts = mem + edges * 2;
+  *bs = mem + edges * 3;
 
-  // count how many snaps we perform
-  int c = 0;
-
-  int al = a->x;
-  int ar = al + a->w - 1;
-  int at = a->y;
-  int ab = at + a->h - 1;
-
-  int bl = b->x;
-  int br = bl + b->w - 1;
-  int bt = b->y;
-  int bb = bt + b->h - 1;
-
-  int tmp;
-
-  int nl = al;
-  int nr = ar;
-  int nt = at;
-  int nb = ab;
-
-  // left
-  tmp = br + 1 + BORDER_WIDTH * 2;
-  if (abs(al - bl) < s) {
-    nl = bl;
-    c++;
-  } else if (abs(al - tmp) < s) {
-    nl = tmp;
-    c++;
-  }
-
-  // right
-  tmp = bl - 1 - BORDER_WIDTH * 2;
-  if (abs(ar - br) < s) {
-    nr = br;
-    c++;
-  } else if (abs(ar - tmp) < s) {
-    nr = tmp;
-    c++;
-  }
-
-  // bottom
-  tmp = bt - 1 - BORDER_WIDTH * 2;
-  if (abs(ab - bb) < s) {
-    nb = bb;
-    c++;
-  } else if (abs(ab - tmp) < s) {
-    nb = tmp;
-    c++;
-  }
-
-  // top
-  tmp = bb + 1 + BORDER_WIDTH * 2;
-  if (abs(at - bt) < s) {
-    nt = bt;
-    c++;
-  } else if (abs(at - tmp) < s) {
-    nt = tmp;
-    c++;
-  }
-
-  a->x = nl;
-  a->y = nt;
-  a->w = nr - nl + 1;
-  a->h = nb - nt + 1;
-
-  return c;
-}
-
-void snap_rects(Rectangle* rect, Rectangle* snaps, int nsnaps) {
-  for (int i = 0; i < nsnaps; i++) {
-    snap(rect, &snaps[i]);
-  }
-}
-
-Rectangle** make_snap_list(Client* skip, int* ret) {
-  info("making snap list");
-
-  int nc = clients_count();
-  int n = nc - 1;
-  *ret = n;
-
-  Rectangle** snaps = malloc(n * sizeof snaps);
-
-  int count = 0;
-  int cn = -1;
+  unsigned int gap = BORDER_WIDTH * 2 + BORDER_GAP;
+  unsigned int count = 0;
+  int ci = -1;
   Client* c;
-  while ((c = clients_next(&cn))) {
+  while ((c = clients_next(&ci))) {
     if (skip == c) {
       continue;
     }
-    snaps[count] = &c->bounds;
+
+    Rectangle rect = c->bounds;
+    int r = rect.x + rect.w - 1;
+    int b = rect.y + rect.h - 1;
+
+    (*ls)[count] = rect.x;
+    (*rs)[count] = r;
+    (*ts)[count] = rect.y;
+    (*bs)[count] = b;
+    count++;
+
+    (*ls)[count] = r + gap;
+    (*rs)[count] = rect.x - gap;
+    (*ts)[count] = b + gap;
+    (*bs)[count] = rect.y - gap;
     count++;
   }
-  assert(count == n);
 
-  info("built snap list with %d elements", n);
-  return snaps;
+  (*ls)[count] = 0;
+  (*rs)[count] = 800;
+  (*ts)[count] = 0;
+  (*bs)[count] = 600;
+  count++;
+
+  assert(count == edges);
+  return edges;
 }
 
 void handle_motion(XMotionEvent* event) {
@@ -450,11 +397,11 @@ void handle_motion(XMotionEvent* event) {
     break;
   }
 
-  Rectangle r;
-  r.x = wx + xp * dx;
-  r.y = wy + yp * dy;
-  r.w = ww + xw * dx;
-  r.h = wh + yw * dy;
+  Rectangle rect;
+  rect.x = wx + xp * dx;
+  rect.y = wy + yp * dy;
+  rect.w = ww + xw * dx;
+  rect.h = wh + yw * dy;
 
   Window win = drag_state.win;
   Client* c = clients_find(win);
@@ -462,13 +409,15 @@ void handle_motion(XMotionEvent* event) {
     info("no client for: %d", win);
   }
 
-  int n;
-  Rectangle** snaps = make_snap_list(c, &n);
+  int *ls, *rs, *ts, *bs;
+  unsigned int n = make_snap_lists(c, &ls, &rs, &ts, &bs);
+  int l = snap(rect.x, ls, n);
+  int r = snap(rect.x + rect.w - 1, rs, n);
+  int t = snap(rect.y, ts, n);
+  int b = snap(rect.y + rect.h - 1, bs, n);
+  free(ls);
 
-  snap_rects(&r, *snaps, n);
-  free(snaps);
-
-  XMoveResizeWindow(dsp, win, r.x, r.y, r.w, r.h);
+  XMoveResizeWindow(dsp, win, l, t, r - l + 1, b - t + 1);
 }
 
 void handle_focus_in(XFocusChangeEvent* event) {

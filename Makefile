@@ -3,10 +3,15 @@ cc=gcc
 
 all : wm test
 
-wm : wm.c
+test : test_buffer test_snap
+
+wm : wm.c snap.c
 	$(cc) $(flags) -lX11 -o $@ $^
 
-test : test_buffer.c buffer.c
+test_buffer : test_buffer.c buffer.c
+	$(cc) $(flags) -lX11 -o $@ $^
+
+test_snap : test_snap.c snap.c
 	$(cc) $(flags) -lX11 -o $@ $^
 
 check-syntax :

@@ -1,5 +1,4 @@
 #include "buffer.h"
-#include <assert.h>
 #include <stdio.h>
 
 void assert_int(int expected, int actual) {
