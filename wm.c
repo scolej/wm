@@ -41,8 +41,14 @@ void warn(char* msg, ...) {
   fflush(stdout);
 }
 
+// todo
 void fine(char* msg, ...) {
-  // todo
+  va_list args;
+  va_start(args, msg);
+  vprintf(msg, args);
+  va_end(args);
+  printf("\n");
+  fflush(stdout);
 }
 
 typedef struct {
@@ -139,24 +145,34 @@ void manage_new_window(Window win) {
     return;
   }
 
-  // Init new client
   c->win = win;
-  c->bounds.x = -1;
-  c->bounds.y = -1;
-  c->bounds.w = -1;
-  c->bounds.h = -1;
+
+  Status st;
+  XWindowAttributes attr;
+  st = XGetWindowAttributes(dsp, win, &attr);
+  if (st) {
+    c->bounds.x = attr.x;
+    c->bounds.y = attr.y;
+    c->bounds.w = attr.width;
+    c->bounds.h = attr.height;
+  } else {
+    warn("failed to get initial window attributes for %d", win);
+    c->bounds.x = -1;
+    c->bounds.y = -1;
+    c->bounds.w = -1;
+    c->bounds.h = -1;
+  }
 
   XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
   XSetWindowBorder(dsp, win, grey.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
-  // todo is it necessary to repeat this on every map?
 
-  info("new window: %d", win);
+  fine("new window: %d", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
-  info("map request for window: %d", win);
+  fine("map request for window: %d", win);
   manage_new_window(win);
   XMapWindow(dsp, win);
 }
@@ -164,7 +180,7 @@ void handle_map_request(XMapRequestEvent* event) {
 void handle_enter_notify(XCrossingEvent* event) {
   Window win = event->window;
   long t = event->time;
-  info("changing focus on enter-notify to window %d", win);
+  fine("changing focus on enter-notify to window %d", win);
   XSetInputFocus(dsp, win, RevertToParent, t);
 }
 
