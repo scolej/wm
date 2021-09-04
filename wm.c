@@ -128,8 +128,9 @@ unsigned int clients_count() {
 }
 
 // todo pass around a context?
-Display* dsp;
+Display *dsp;
 XColor red, grey;
+unsigned int screen_width, screen_height;
 
 void manage_new_window(Window win) {
   Client* c = clients_next_available();
@@ -308,9 +309,9 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
   }
 
   (*ls)[count] = 0;
-  (*rs)[count] = 800;
+  (*rs)[count] = screen_width - BORDER_WIDTH * 2 - 1;
   (*ts)[count] = 0;
-  (*bs)[count] = 600;
+  (*bs)[count] = screen_height - BORDER_WIDTH * 2 - 1;
   count++;
 
   assert(count == edges);
@@ -468,10 +469,15 @@ int main(int argc, char** argv) {
     fatal("could not open display");
   }
 
-  Colormap cm = XDefaultColormap(dsp, DefaultScreen(dsp));
+  int default_screen = DefaultScreen(dsp);
+
+  Colormap cm = XDefaultColormap(dsp, default_screen);
   if (!cm) {
     fatal("could not get colour-map");
   }
+
+  screen_width = DisplayWidth(dsp, default_screen);
+  screen_height = DisplayHeight(dsp, default_screen);
 
   XColor col;
   Status st;
@@ -503,7 +509,7 @@ int main(int argc, char** argv) {
   if (!st) {
     fatal("couldn't query initial window list");
   }
-  for (int i = 0; i < count; i++) {
+  for (unsigned int i = 0; i < count; i++) {
     manage_new_window(children[i]);
   }
   XFree(children);
