@@ -103,6 +103,9 @@ PI clients_find(Window w) {
 Display *dsp;
 XColor red, grey;
 unsigned int screen_width, screen_height;
+KeyCode key_m;
+KeyCode key_v;
+KeyCode key_h;
 
 void manage_new_window(Window win) {
   Client c;
@@ -259,7 +262,7 @@ void handle_button_release(XButtonEvent* event) {
   }
 }
 
-void toggle_maximize(Window win) {
+void toggle_maximize(Window win, char kind) {
   fine("toggle maximize for %d", win);
 
   Client *c = clients_find(win).data;
@@ -268,21 +271,50 @@ void toggle_maximize(Window win) {
     return;
   }
 
+  Rectangle new;
+  Rectangle cur = c->current_bounds;
   if (c->max_state) {
     c->max_state = MAX_NONE;
-    Rectangle r = c->orig_bounds;
-    XMoveResizeWindow(dsp, win, r.x, r.y, r.w, r.h);
+    new = c->orig_bounds;
   } else {
-    c->max_state = MAX_BOTH;
-    c->orig_bounds = c->current_bounds;
-    XMoveResizeWindow(dsp, win, 0, 0,
-                      screen_width - BORDER_WIDTH * 2,
-                      screen_height - BORDER_WIDTH * 2);
+    c->max_state = kind;
+    c->orig_bounds = cur;
+    switch (kind) {
+    case MAX_BOTH:
+      new.x = 0;
+      new.y = 0;
+      new.w = screen_width - BORDER_WIDTH * 2;
+      new.h = screen_height - BORDER_WIDTH * 2;
+      break;
+    case MAX_VERT:
+      new.x = cur.x;
+      new.y = 0;
+      new.w = cur.w;
+      new.h = screen_height - BORDER_WIDTH * 2;
+      break;
+    case MAX_HORI:
+      new.x = 0;
+      new.y = cur.y;
+      new.w = screen_width - BORDER_WIDTH * 2;
+      new.h = cur.h;
+      break;
+    }
   }
+  XMoveResizeWindow(dsp, win, new.x, new.y, new.w, new.h);
 }
 
 void handle_key_release(XKeyEvent *event) {
-  toggle_maximize(event->subwindow);
+  Window win = event->subwindow;
+  KeyCode kc = event->keycode;
+  if (kc == key_m) {
+    toggle_maximize(win, MAX_BOTH);
+  } else if (kc == key_v) {
+    toggle_maximize(win, MAX_VERT);
+  } else if (kc == key_h) {
+    toggle_maximize(win, MAX_HORI);
+  } else {
+    warn("unhandled key");
+  }
 }
 
 // Make snap lists for edges: lefts, rights, tops, bottoms. These are the
@@ -551,8 +583,12 @@ int main(int argc, char** argv) {
               ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
               GrabModeAsync, GrabModeAsync, None, None);
 
-  KeyCode km = XKeysymToKeycode(dsp, XK_M);
-  XGrabKey(dsp, km, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  key_m = XKeysymToKeycode(dsp, XK_M);
+  key_v = XKeysymToKeycode(dsp, XK_V);
+  key_h = XKeysymToKeycode(dsp, XK_H);
+  XGrabKey(dsp, key_m, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  XGrabKey(dsp, key_v, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  XGrabKey(dsp, key_h, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
