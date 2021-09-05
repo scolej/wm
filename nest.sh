@@ -5,7 +5,7 @@ set -eu
 make
 
 
-Xnest :1 &
+Xnest :1 -geometry 800x600+0+0 &
 nestpid=$!
 
 sleep 1

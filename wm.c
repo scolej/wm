@@ -1,6 +1,7 @@
 #include "buffer.h"
 #include "snap.h"
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -54,9 +55,21 @@ typedef struct {
   int x, y, w, h;
 } Rectangle;
 
+#define MAX_NONE 0
+#define MAX_BOTH 1
+#define MAX_VERT 2
+#define MAX_HORI 3
+
 typedef struct {
   Window win;
-  Rectangle bounds;
+
+  Rectangle current_bounds;
+
+  // maximization state
+  char max_state;
+  // bounds without any maximization applied.
+  // only non-zero after a maximization has been applied.
+  Rectangle orig_bounds;
 } Client;
 // todo
 // last focus time
@@ -99,17 +112,19 @@ void manage_new_window(Window win) {
   XWindowAttributes attr;
   st = XGetWindowAttributes(dsp, win, &attr);
   if (st) {
-    c.bounds.x = attr.x;
-    c.bounds.y = attr.y;
-    c.bounds.w = attr.width;
-    c.bounds.h = attr.height;
+    c.current_bounds.x = attr.x;
+    c.current_bounds.y = attr.y;
+    c.current_bounds.w = attr.width;
+    c.current_bounds.h = attr.height;
   } else {
     warn("failed to get initial window attributes for %d", win);
-    c.bounds.x = -1;
-    c.bounds.y = -1;
-    c.bounds.w = -1;
-    c.bounds.h = -1;
+    c.current_bounds.x = -1;
+    c.current_bounds.y = -1;
+    c.current_bounds.w = -1;
+    c.current_bounds.h = -1;
   }
+
+  c.max_state = MAX_NONE;
 
   buffer_add(&clients, &c);
 
@@ -244,6 +259,32 @@ void handle_button_release(XButtonEvent* event) {
   }
 }
 
+void toggle_maximize(Window win) {
+  fine("toggle maximize for %d", win);
+
+  Client *c = clients_find(win).data;
+  if (!c) {
+    warn("no client for window: %d", win);
+    return;
+  }
+
+  if (c->max_state) {
+    c->max_state = MAX_NONE;
+    Rectangle r = c->orig_bounds;
+    XMoveResizeWindow(dsp, win, r.x, r.y, r.w, r.h);
+  } else {
+    c->max_state = MAX_BOTH;
+    c->orig_bounds = c->current_bounds;
+    XMoveResizeWindow(dsp, win, 0, 0,
+                      screen_width - BORDER_WIDTH * 2,
+                      screen_height - BORDER_WIDTH * 2);
+  }
+}
+
+void handle_key_release(XKeyEvent *event) {
+  toggle_maximize(event->subwindow);
+}
+
 // Make snap lists for edges: lefts, rights, tops, bottoms. These are the
 // values for each edge which we can snap to. The pointer written into
 // lefts needs to be freed by the caller. The other pointers share this
@@ -267,7 +308,7 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
       continue;
     }
 
-    Rectangle rect = c->bounds;
+    Rectangle rect = c->current_bounds;
     int r = rect.x + rect.w - 1;
     int b = rect.y + rect.h - 1;
 
@@ -420,10 +461,10 @@ void handle_configure(XConfigureEvent* event) {
     warn("we have no client for window %d", win);
     return;
   }
-  c->bounds.x = x;
-  c->bounds.y = y;
-  c->bounds.w = w;
-  c->bounds.h = h;
+  c->current_bounds.x = x;
+  c->current_bounds.y = y;
+  c->current_bounds.w = w;
+  c->current_bounds.h = h;
   fine("new position for window %d is [%d %d %d %d]", win, x, y, w, h);
 }
 
@@ -510,6 +551,9 @@ int main(int argc, char** argv) {
               ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
               GrabModeAsync, GrabModeAsync, None, None);
 
+  KeyCode km = XKeysymToKeycode(dsp, XK_M);
+  XGrabKey(dsp, km, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
   for (;;) {
@@ -528,6 +572,9 @@ int main(int argc, char** argv) {
       break;
     case ButtonRelease:
       handle_button_release((XButtonEvent*)&event.xbutton);
+      break;
+    case KeyPress:
+      handle_key_release((XKeyEvent*)&event.xkey);
       break;
     case MotionNotify:
       handle_motion((XMotionEvent*)&event.xmotion);
