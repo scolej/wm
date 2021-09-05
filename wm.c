@@ -179,20 +179,15 @@ void handle_button_press(XButtonEvent* event) {
   int y = event->y_root;
 
   if (event->button == 1) {
-    // fixme used cached values
-    XWindowAttributes attr;
-    XGetWindowAttributes(dsp, win, &attr);
-    int win_x = attr.x;
-    int win_y = attr.y;
-    int win_w = attr.width;
-    int win_h = attr.height;
+    Client *c = clients_find(win).data;
+    Rectangle bounds = c->current_bounds;
 
     float r = 0.1;
     int x1, x2, y1, y2;
-    x1 = win_x + win_w * r;
-    x2 = win_x + win_w * (1.0 - r);
-    y1 = win_y + win_h * r;
-    y2 = win_y + win_h * (1.0 - r);
+    x1 = bounds.x + bounds.w * r;
+    x2 = bounds.x + bounds.w * (1.0 - r);
+    y1 = bounds.y + bounds.h * r;
+    y2 = bounds.y + bounds.h * (1.0 - r);
     info("drag thresholds are %d %d and %d %d", x1, x2, y1, y2);
 
     enum DragHandle dhx;
@@ -235,13 +230,16 @@ void handle_button_press(XButtonEvent* event) {
     }
 
     drag_state.win = win;
-    drag_state.start_win_x = win_x;
-    drag_state.start_win_y = win_y;
-    drag_state.start_win_w = win_w;
-    drag_state.start_win_h = win_h;
+    drag_state.start_win_x = bounds.x;
+    drag_state.start_win_y = bounds.y;
+    drag_state.start_win_w = bounds.w;
+    drag_state.start_win_h = bounds.h;
     drag_state.start_mouse_x = x;
     drag_state.start_mouse_y = y;
     drag_state.kind = dk;
+
+    // any manual resize/move reverts the maximization state
+    c->max_state = MAX_NONE;
 
     info("started dragging window %d", win);
 
