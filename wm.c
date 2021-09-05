@@ -273,12 +273,17 @@ void toggle_maximize(Window win, char kind) {
 
   Rectangle new;
   Rectangle cur = c->current_bounds;
-  if (c->max_state) {
+  if (c->max_state == kind) {
+    // restore orig if we're toggling the same kind as current
     c->max_state = MAX_NONE;
     new = c->orig_bounds;
   } else {
+    if (c->max_state == MAX_NONE) {
+      // only stash current bounds from no-maximization-state
+      c->orig_bounds = cur;
+    }
+    Rectangle orig = c->orig_bounds;
     c->max_state = kind;
-    c->orig_bounds = cur;
     switch (kind) {
     case MAX_BOTH:
       new.x = 0;
@@ -287,16 +292,16 @@ void toggle_maximize(Window win, char kind) {
       new.h = screen_height - BORDER_WIDTH * 2;
       break;
     case MAX_VERT:
-      new.x = cur.x;
+      new.x = orig.x;
       new.y = 0;
-      new.w = cur.w;
+      new.w = orig.w;
       new.h = screen_height - BORDER_WIDTH * 2;
       break;
     case MAX_HORI:
       new.x = 0;
-      new.y = cur.y;
+      new.y = orig.y;
       new.w = screen_width - BORDER_WIDTH * 2;
-      new.h = cur.h;
+      new.h = orig.h;
       break;
     }
   }
