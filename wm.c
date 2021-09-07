@@ -106,6 +106,7 @@ unsigned int screen_width, screen_height;
 KeyCode key_m;
 KeyCode key_v;
 KeyCode key_h;
+KeyCode key_esc;
 
 void manage_new_window(Window win) {
   Client c;
@@ -152,12 +153,16 @@ void handle_enter_notify(XCrossingEvent* event) {
   XSetInputFocus(dsp, win, RevertToParent, t);
 }
 
+// 9 different ways to move/resize, depending on
+// where the initial press happens
 enum DragKind {
   MOVE,
   RESIZE_E, RESIZE_W, RESIZE_N, RESIZE_S,
   RESIZE_NW, RESIZE_NE, RESIZE_SW, RESIZE_SE,
 };
 
+// intersection of 3 regions on two axes creates
+// the different drag handles
 enum DragHandle {
   LOW, MIDDLE, HIGH
 };
@@ -180,6 +185,11 @@ void handle_button_press(XButtonEvent* event) {
 
   if (event->button == 1) {
     Client *c = clients_find(win).data;
+    if (!c) {
+      warn("no client for window: %d" win);
+      return;
+    }
+
     Rectangle bounds = c->current_bounds;
 
     float r = 0.1;
@@ -188,7 +198,6 @@ void handle_button_press(XButtonEvent* event) {
     x2 = bounds.x + bounds.w * (1.0 - r);
     y1 = bounds.y + bounds.h * r;
     y2 = bounds.y + bounds.h * (1.0 - r);
-    info("drag thresholds are %d %d and %d %d", x1, x2, y1, y2);
 
     enum DragHandle dhx;
     if (x < x1) {
@@ -239,9 +248,8 @@ void handle_button_press(XButtonEvent* event) {
     drag_state.kind = dk;
 
     // any manual resize/move reverts the maximization state
+    // todo this should really happen on move, not press
     c->max_state = MAX_NONE;
-
-    info("started dragging window %d", win);
 
     XRaiseWindow(dsp, win);
   }
@@ -315,6 +323,8 @@ void handle_key_release(XKeyEvent *event) {
     toggle_maximize(win, MAX_VERT);
   } else if (kc == key_h) {
     toggle_maximize(win, MAX_HORI);
+  } else if (kc == key_esc) {
+    XLowerWindow(dsp, win);
   } else {
     warn("unhandled key");
   }
@@ -589,9 +599,11 @@ int main(int argc, char** argv) {
   key_m = XKeysymToKeycode(dsp, XK_M);
   key_v = XKeysymToKeycode(dsp, XK_V);
   key_h = XKeysymToKeycode(dsp, XK_H);
+  key_esc = XKeysymToKeycode(dsp, XK_Escape);
   XGrabKey(dsp, key_m, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
   XGrabKey(dsp, key_v, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
   XGrabKey(dsp, key_h, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  XGrabKey(dsp, key_esc, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
