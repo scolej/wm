@@ -6,6 +6,8 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/time.h>
+#include <signal.h>
 
 #define BORDER_WIDTH 2
 #define BORDER_GAP 3
@@ -103,10 +105,14 @@ PI clients_find(Window w) {
 Display *dsp;
 XColor red, grey;
 unsigned int screen_width, screen_height;
-KeyCode key_m;
-KeyCode key_v;
-KeyCode key_h;
-KeyCode key_esc;
+KeyCode key_m, key_v, key_h, key_esc, key_modl, key_modr;
+
+// we'll set this to 1 when we start cycling through windows.
+// when timer expires, we'll set it back to 0 and update the window's focus time.
+int transient_switching = 0;
+
+// signal handler sets this to 1 when timer expires
+int timer_expired = 0;
 
 void manage_new_window(Window win) {
   Client c;
@@ -186,7 +192,7 @@ void handle_button_press(XButtonEvent* event) {
   if (event->button == 1) {
     Client *c = clients_find(win).data;
     if (!c) {
-      warn("no client for window: %d" win);
+      warn("no client for window: %d", win);
       return;
     }
 
@@ -314,6 +320,28 @@ void toggle_maximize(Window win, char kind) {
   XMoveResizeWindow(dsp, win, new.x, new.y, new.w, new.h);
 }
 
+void timer_handler(int signal) {
+  timer_expired = 1;
+  info("timer expired");
+}
+
+void switch_windows() {
+  if (!transient_switching) {
+    transient_switching = 1;
+  }
+  // switch_next_window();
+
+  info("set timer");
+
+  // reset the timer
+  struct itimerval t;
+  t.it_value.tv_sec = 1;
+  t.it_value.tv_usec = 0;
+  t.it_interval.tv_sec = 0;
+  t.it_interval.tv_usec = 0;
+  setitimer(ITIMER_REAL, &t, NULL);
+}
+
 void handle_key_release(XKeyEvent *event) {
   Window win = event->subwindow;
   KeyCode kc = event->keycode;
@@ -325,6 +353,8 @@ void handle_key_release(XKeyEvent *event) {
     toggle_maximize(win, MAX_HORI);
   } else if (kc == key_esc) {
     XLowerWindow(dsp, win);
+  } else if (kc == key_modl || kc == key_modr) {
+    switch_windows();
   } else {
     warn("unhandled key");
   }
@@ -533,6 +563,12 @@ int error_handler(Display *dsp, XErrorEvent *event) {
 }
 
 int main(int argc, char** argv) {
+  struct sigaction act;
+  act.sa_handler = timer_handler;
+  sigemptyset(&act.sa_mask);
+  act.sa_flags = 0;
+  sigaction(SIGALRM, &act, NULL);
+
   dsp = XOpenDisplay(NULL);
   if (!dsp) {
      fatal("could not open display");
@@ -597,13 +633,25 @@ int main(int argc, char** argv) {
               GrabModeAsync, GrabModeAsync, None, None);
 
   key_m = XKeysymToKeycode(dsp, XK_M);
-  key_v = XKeysymToKeycode(dsp, XK_V);
-  key_h = XKeysymToKeycode(dsp, XK_H);
-  key_esc = XKeysymToKeycode(dsp, XK_Escape);
   XGrabKey(dsp, key_m, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+
+  key_v = XKeysymToKeycode(dsp, XK_V);
   XGrabKey(dsp, key_v, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+
+  key_h = XKeysymToKeycode(dsp, XK_H);
   XGrabKey(dsp, key_h, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+
   XGrabKey(dsp, key_esc, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  key_esc = XKeysymToKeycode(dsp, XK_Escape);
+
+  key_modl = XKeysymToKeycode(dsp, XK_Super_L);
+  // todo do we need to grab both?
+  XGrabKey(dsp, key_modl, 0, root, False, GrabModeAsync, GrabModeAsync);
+  XGrabKey(dsp, key_modl, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+
+  key_modr = XKeysymToKeycode(dsp, XK_Super_R);
+  XGrabKey(dsp, key_modr, 0, root, False, GrabModeAsync, GrabModeAsync);
+  XGrabKey(dsp, key_modr, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 

@@ -1,4 +1,4 @@
-flags=-Wall -std=c99 -g -Werror
+flags=-Wall -g -Werror
 cc=gcc
 
 all : wm test
