@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
+#include <poll.h>
 #include <signal.h>
 
 #define BORDER_WIDTH 2
@@ -109,10 +110,10 @@ KeyCode key_m, key_v, key_h, key_esc, key_modl, key_modr;
 
 // we'll set this to 1 when we start cycling through windows.
 // when timer expires, we'll set it back to 0 and update the window's focus time.
-int transient_switching = 0;
+char transient_switching = 0;
 
-// signal handler sets this to 1 when timer expires
-int timer_expired = 0;
+// flag indicating timer has expired
+char timer_expired = 0;
 
 void manage_new_window(Window win) {
   Client c;
@@ -322,6 +323,9 @@ void toggle_maximize(Window win, char kind) {
 
 void timer_handler(int signal) {
   timer_expired = 1;
+}
+
+void timer_has_expired() {
   info("timer expired");
 }
 
@@ -331,9 +335,8 @@ void switch_windows() {
   }
   // switch_next_window();
 
-  info("set timer");
-
   // reset the timer
+  info("set timer");
   struct itimerval t;
   t.it_value.tv_sec = 1;
   t.it_value.tv_usec = 0;
@@ -562,6 +565,47 @@ int error_handler(Display *dsp, XErrorEvent *event) {
   return 0;
 }
 
+// grab and dispatch all events in the queue
+void handle_xevents() {
+  while (XPending(dsp)) {
+    XEvent event;
+    XNextEvent(dsp, &event);
+
+    switch (event.type) {
+    case MapRequest:
+      handle_map_request((XMapRequestEvent*)&event.xmaprequest);
+      break;
+    case EnterNotify:
+      handle_enter_notify((XCrossingEvent*)&event.xcrossing);
+      break;
+    case ButtonPress:
+      handle_button_press((XButtonEvent*)&event.xbutton);
+      break;
+    case ButtonRelease:
+      handle_button_release((XButtonEvent*)&event.xbutton);
+      break;
+    case KeyPress:
+      handle_key_release((XKeyEvent*)&event.xkey);
+      break;
+    case MotionNotify:
+      handle_motion((XMotionEvent*)&event.xmotion);
+      break;
+    case FocusIn:
+      handle_focus_in((XFocusChangeEvent*)&event.xfocus);
+      break;
+    case FocusOut:
+      handle_focus_out((XFocusChangeEvent*)&event.xfocus);
+      break;
+    case ConfigureNotify:
+      handle_configure((XConfigureEvent*)&event.xconfigure);
+      break;
+    case DestroyNotify:
+      handle_destroy((XDestroyWindowEvent*)&event.xdestroywindow);
+      break;
+    }
+  }
+}
+
 int main(int argc, char** argv) {
   struct sigaction act;
   act.sa_handler = timer_handler;
@@ -571,7 +615,7 @@ int main(int argc, char** argv) {
 
   dsp = XOpenDisplay(NULL);
   if (!dsp) {
-     fatal("could not open display");
+    fatal("could not open display");
   }
 
   XSetErrorHandler(error_handler);
@@ -655,41 +699,19 @@ int main(int argc, char** argv) {
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
-  for (;;) {
-    XEvent event;
-    XNextEvent(dsp, &event);
+  int xfd = ConnectionNumber(dsp);
 
-    switch (event.type) {
-    case MapRequest:
-      handle_map_request((XMapRequestEvent*)&event.xmaprequest);
-      break;
-    case EnterNotify:
-      handle_enter_notify((XCrossingEvent*)&event.xcrossing);
-      break;
-    case ButtonPress:
-      handle_button_press((XButtonEvent*)&event.xbutton);
-      break;
-    case ButtonRelease:
-      handle_button_release((XButtonEvent*)&event.xbutton);
-      break;
-    case KeyPress:
-      handle_key_release((XKeyEvent*)&event.xkey);
-      break;
-    case MotionNotify:
-      handle_motion((XMotionEvent*)&event.xmotion);
-      break;
-    case FocusIn:
-      handle_focus_in((XFocusChangeEvent*)&event.xfocus);
-      break;
-    case FocusOut:
-      handle_focus_out((XFocusChangeEvent*)&event.xfocus);
-      break;
-    case ConfigureNotify:
-      handle_configure((XConfigureEvent*)&event.xconfigure);
-      break;
-    case DestroyNotify:
-      handle_destroy((XDestroyWindowEvent*)&event.xdestroywindow);
-      break;
+  for (;;) {
+    if (timer_expired) {
+      timer_expired = 0;
+      timer_has_expired();
+    }
+
+    struct pollfd fds[1];
+    fds[0].fd = xfd;
+    fds[0].events = POLLIN;
+    if (poll(fds, 1, 100)) {
+      handle_xevents();
     }
   }
 }
