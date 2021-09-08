@@ -70,9 +70,12 @@ typedef struct {
 
   // maximization state
   char max_state;
+
   // bounds without any maximization applied.
   // only non-zero after a maximization has been applied.
   Rectangle orig_bounds;
+
+  unsigned int focus_time;
 } Client;
 // todo
 // last focus time
@@ -108,6 +111,8 @@ XColor red, grey;
 unsigned int screen_width, screen_height;
 KeyCode key_m, key_v, key_h, key_esc, key_modl, key_modr;
 
+Window last_focused_window = 0;
+
 // we'll set this to 1 when we start cycling through windows.
 // when timer expires, we'll set it back to 0 and update the window's focus time.
 char transient_switching = 0;
@@ -136,6 +141,7 @@ void manage_new_window(Window win) {
   }
 
   c.max_state = MAX_NONE;
+  c.focus_time = 0;
 
   buffer_add(&clients, &c);
 
@@ -321,19 +327,68 @@ void toggle_maximize(Window win, char kind) {
   XMoveResizeWindow(dsp, win, new.x, new.y, new.w, new.h);
 }
 
+void track_focus_change(Window win) {
+    // increment all focus counters
+    for (unsigned int i = 0; i < clients.length; i++) {
+      Client *c = buffer_get(&clients, i);
+      c->focus_time++;
+    }
+
+    // current focus gets 0
+    Client *c = clients_find(win).data;
+    if (!c) {
+      info("no client for: %d", win);
+      return;
+    }
+    c->focus_time = 0;
+}
+
 void timer_handler(int signal) {
   timer_expired = 1;
 }
 
 void timer_has_expired() {
   info("timer expired");
+  transient_switching = 0;
+  track_focus_change(last_focused_window);
+}
+
+void switch_next_window() {
+  Client *current = clients_find(last_focused_window).data;
+  if (!current) {
+    info("no client for last focused window: %d", last_focused_window);
+    return;
+  }
+  unsigned int ct = current->focus_time;
+
+  // find the client with lowest focus time which is greater than this focus time
+  unsigned int t = 1000; // fixme
+  Client *next = NULL;
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    if (c == current) {
+      continue;
+    }
+    unsigned int ft = c->focus_time;
+    if (ft > ct && ft < t) {
+      t = ft;
+      next = c;
+    }
+  }
+
+  if (!next) {
+    warn("found no client for next");
+    return;
+  }
+
+  XRaiseWindow(dsp, next->win);
+  XSetInputFocus(dsp, next->win, RevertToParent, CurrentTime);
 }
 
 void switch_windows() {
   if (!transient_switching) {
     transient_switching = 1;
   }
-  // switch_next_window();
 
   // reset the timer
   info("set timer");
@@ -343,6 +398,8 @@ void switch_windows() {
   t.it_interval.tv_sec = 0;
   t.it_interval.tv_usec = 0;
   setitimer(ITIMER_REAL, &t, NULL);
+
+  switch_next_window();
 }
 
 void handle_key_release(XKeyEvent *event) {
@@ -518,8 +575,15 @@ void handle_motion(XMotionEvent* event) {
 
 void handle_focus_in(XFocusChangeEvent* event) {
   Window win = event->window;
+  last_focused_window = win;
   XSetWindowBorder(dsp, win, red.pixel);
   info("focus in for window %d", win);
+
+  if (transient_switching) {
+    info("ignore focus change while transient switching", win);
+  } else {
+    track_focus_change(win);
+  }
 }
 
 void handle_focus_out(XFocusChangeEvent* event) {
