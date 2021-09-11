@@ -97,7 +97,6 @@ PI clients_find(Window w) {
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
     if (c->win == w) {
-      fine("found client for window %d at index %d", w, i);
       p.data = c;
       p.index = i;
     }
@@ -351,6 +350,8 @@ void timer_has_expired() {
   info("timer expired");
   transient_switching = 0;
   track_focus_change(last_focused_window);
+  XAllowEvents(dsp, SyncPointer, CurrentTime);
+  //XAllowEvents(dsp, AsyncKeyboard, CurrentTime);
 }
 
 void switch_next_window() {
@@ -381,11 +382,15 @@ void switch_next_window() {
     return;
   }
 
-  XRaiseWindow(dsp, next->win);
-  XSetInputFocus(dsp, next->win, RevertToParent, CurrentTime);
+  Window win = next->win;
+  info("setting focus to %d", win);
+  XRaiseWindow(dsp, win);
+  XSetInputFocus(dsp, win, RevertToParent, CurrentTime);
 }
 
 void switch_windows() {
+  info("switching windows");
+
   if (!transient_switching) {
     transient_switching = 1;
   }
@@ -574,6 +579,11 @@ void handle_motion(XMotionEvent* event) {
 }
 
 void handle_focus_in(XFocusChangeEvent* event) {
+  if (event->mode == NotifyGrab) {
+    info("discard grab focus-in");
+    return;
+  }
+
   Window win = event->window;
   last_focused_window = win;
   XSetWindowBorder(dsp, win, red.pixel);
@@ -649,7 +659,11 @@ void handle_xevents() {
       handle_button_release((XButtonEvent*)&event.xbutton);
       break;
     case KeyPress:
+      info("key press");
       handle_key_release((XKeyEvent*)&event.xkey);
+      break;
+    case KeyRelease:
+      info("key release");
       break;
     case MotionNotify:
       handle_motion((XMotionEvent*)&event.xmotion);
@@ -688,6 +702,7 @@ int main(int argc, char** argv) {
   if (!root) {
     fatal("could not open display");
   }
+  info("root window is %d", root);
 
   int default_screen = DefaultScreen(dsp);
 
@@ -734,6 +749,8 @@ int main(int argc, char** argv) {
   }
   XFree(children);
 
+  info("retroot is %d", retroot);
+
   drag_state.win = 0;
 
   XGrabButton(dsp, AnyButton, MODMASK, root, False,
@@ -752,30 +769,38 @@ int main(int argc, char** argv) {
   XGrabKey(dsp, key_esc, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
   key_esc = XKeysymToKeycode(dsp, XK_Escape);
 
-  key_modl = XKeysymToKeycode(dsp, XK_Super_L);
-  // todo do we need to grab both?
-  XGrabKey(dsp, key_modl, 0, root, False, GrabModeAsync, GrabModeAsync);
-  XGrabKey(dsp, key_modl, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  // todo sync??
+  // looks like pressing super first moves focus off the current win
 
-  key_modr = XKeysymToKeycode(dsp, XK_Super_R);
-  XGrabKey(dsp, key_modr, 0, root, False, GrabModeAsync, GrabModeAsync);
-  XGrabKey(dsp, key_modr, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  key_modl = XKeysymToKeycode(dsp, XK_A);
+  // todo do we need to grab both?
+  XGrabKey(dsp, key_modl, 0, root, False, GrabModeSync, GrabModeAsync);
+  //XGrabKey(dsp, key_modl, Mod2Mask, root, False, GrabModeSync, GrabModeSync);
+
+  //key_modr = XKeysymToKeycode(dsp, XK_Control_R);
+  //XGrabKey(dsp, key_modr, 0, root, False, GrabModeSync, GrabModeSync);
+  //XGrabKey(dsp, key_modr, Mod2Mask, root, False, GrabModeSync, GrabModeSync);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
   int xfd = ConnectionNumber(dsp);
 
+  unsigned int ticker = 0;
   for (;;) {
     if (timer_expired) {
       timer_expired = 0;
       timer_has_expired();
     }
 
+    handle_xevents();
+
+    // sleep, but not if there's incoming data
     struct pollfd fds[1];
     fds[0].fd = xfd;
     fds[0].events = POLLIN;
-    if (poll(fds, 1, 100)) {
-      handle_xevents();
-    }
+    poll(fds, 1, 100);
+
+    if (ticker % 100 == 0) info(".");
+    ticker++;
   }
 }
