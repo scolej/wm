@@ -10,10 +10,17 @@
 #include <poll.h>
 #include <signal.h>
 
-#define BORDER_WIDTH 2
-#define BORDER_GAP 3
-#define MODMASK Mod1Mask
+#define BORDER_WIDTH 4
+#define BORDER_GAP 4
 // todo screen gap
+
+#define MODMASK Mod4Mask
+#define MODL XK_Super_L
+#define MODR XK_Super_R
+
+// #define MODMASK Mod1Mask
+// #define MODL XK_Alt_L
+// #define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -106,7 +113,7 @@ PI clients_find(Window w) {
 
 // todo pass around a context?
 Display *dsp;
-XColor red, grey;
+XColor focused, unfocused, switching;
 unsigned int screen_width, screen_height;
 KeyCode key_m, key_v, key_h, key_esc, key_modl, key_modr;
 
@@ -145,7 +152,7 @@ void manage_new_window(Window win) {
   buffer_add(&clients, &c);
 
   XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
-  XSetWindowBorder(dsp, win, grey.pixel);
+  XSetWindowBorder(dsp, win, unfocused.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
 
   fine("added new window: %d", win);
@@ -190,7 +197,13 @@ struct {
   enum DragKind kind;
 } drag_state;
 
+// flag indicating whether a modifier press is followed by something else.
+// if it's not, then we can use it to switch windows.
+char prime_mod = 0;
+
 void handle_button_press(XButtonEvent* event) {
+  prime_mod = 0;
+
   Window win = event->subwindow;
   int x = event->x_root;
   int y = event->y_root;
@@ -340,6 +353,8 @@ void track_focus_change(Window win) {
       return;
     }
     c->focus_time = 0;
+
+    XSetWindowBorder(dsp, win, focused.pixel);
 }
 
 void timer_handler(int signal) {
@@ -418,13 +433,22 @@ void switch_windows() {
   // reset the timer
   info("set timer");
   struct itimerval t;
-  t.it_value.tv_sec = 1;
-  t.it_value.tv_usec = 0;
+  t.it_value.tv_sec = 0;
+  t.it_value.tv_usec = 600000;
   t.it_interval.tv_sec = 0;
   t.it_interval.tv_usec = 0;
   setitimer(ITIMER_REAL, &t, NULL);
 
   switch_next_window();
+}
+
+void handle_key_press(XKeyEvent *event) {
+  KeyCode kc = event->keycode;
+  if (kc == key_modl || kc == key_modr) {
+    prime_mod = 1;
+  } else {
+    prime_mod = 0;
+  }
 }
 
 void handle_key_release(XKeyEvent *event) {
@@ -438,7 +462,7 @@ void handle_key_release(XKeyEvent *event) {
     toggle_maximize(win, MAX_HORI);
   } else if (kc == key_esc) {
     XLowerWindow(dsp, win);
-  } else if (kc == key_modl || kc == key_modr) {
+  } else if (prime_mod && (kc == key_modl || kc == key_modr)) {
     switch_windows();
   } else {
     warn("unhandled key");
@@ -585,6 +609,7 @@ void handle_motion(XMotionEvent* event) {
   Client *c = clients_find(win).data;
   if (!c) {
     info("no client for: %d", win);
+    return;
   }
 
   int *ls, *rs, *ts, *bs;
@@ -606,19 +631,23 @@ void handle_focus_in(XFocusChangeEvent* event) {
 
   Window win = event->window;
   last_focused_window = win;
-  XSetWindowBorder(dsp, win, red.pixel);
   info("focus in for window %d", win);
 
   if (transient_switching) {
-    info("ignore focus change while transient switching", win);
+    XSetWindowBorder(dsp, win, switching.pixel);
   } else {
     track_focus_change(win);
   }
 }
 
 void handle_focus_out(XFocusChangeEvent* event) {
+  if (event->mode == NotifyGrab) {
+    info("discard grab focus-out");
+    return;
+  }
+
   Window win = event->window;
-  XSetWindowBorder(dsp, win, grey.pixel);
+  XSetWindowBorder(dsp, win, unfocused.pixel);
   info("focus out for window %d", win);
 }
 
@@ -680,10 +709,11 @@ void handle_xevents() {
       break;
     case KeyPress:
       info("key press");
-      handle_key_release((XKeyEvent*)&event.xkey);
+      handle_key_press((XKeyEvent*)&event.xkey);
       break;
     case KeyRelease:
       info("key release");
+      handle_key_release((XKeyEvent*)&event.xkey);
       break;
     case MotionNotify:
       handle_motion((XMotionEvent*)&event.xmotion);
@@ -737,14 +767,14 @@ int main(int argc, char** argv) {
   XColor col;
   Status st;
 
-  col.red = 65535;
+  col.red = 40000;
   col.green = 0;
   col.blue = 0;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
     fatal("could not allocate colour");
   }
-  red = col;
+  focused = col;
 
   col.red = 30000;
   col.green = 30000;
@@ -753,7 +783,16 @@ int main(int argc, char** argv) {
   if (!st) {
     fatal("could not allocate colour");
   }
-  grey = col;
+  unfocused = col;
+
+  col.red = 65535;
+  col.green = 0;
+  col.blue = 0;
+  st = XAllocColor(dsp, cm, &col);
+  if (!st) {
+    fatal("could not allocate colour");
+  }
+  switching = col;
 
   buffer_init(&clients, 500, sizeof(Client));
 
@@ -792,14 +831,11 @@ int main(int argc, char** argv) {
   // todo sync??
   // looks like pressing super first moves focus off the current win
 
-  key_modl = XKeysymToKeycode(dsp, XK_A);
-  // todo do we need to grab both?
-  XGrabKey(dsp, key_modl, 0, root, False, GrabModeSync, GrabModeAsync);
-  //XGrabKey(dsp, key_modl, Mod2Mask, root, False, GrabModeSync, GrabModeSync);
+  key_modl = XKeysymToKeycode(dsp, MODL);
+  XGrabKey(dsp, key_modl, 0, root, False, GrabModeAsync, GrabModeAsync);
 
-  //key_modr = XKeysymToKeycode(dsp, XK_Control_R);
-  //XGrabKey(dsp, key_modr, 0, root, False, GrabModeSync, GrabModeSync);
-  //XGrabKey(dsp, key_modr, Mod2Mask, root, False, GrabModeSync, GrabModeSync);
+  key_modr = XKeysymToKeycode(dsp, MODR);
+  XGrabKey(dsp, key_modr, 0, root, False, GrabModeAsync, GrabModeAsync);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
