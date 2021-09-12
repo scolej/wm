@@ -17,6 +17,7 @@ void buffer_free(Buffer* buf) {
 }
 
 void* buffer_get(Buffer* buf, unsigned long index) {
+  assert(index < buf->length);
   return &buf->data[index * buf->elem_size];
 }
 

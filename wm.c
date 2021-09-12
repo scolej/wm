@@ -23,9 +23,9 @@
 #define MODL XK_Super_L
 #define MODR XK_Super_R
 
-/* #define MODMASK Mod1Mask */
-/* #define MODL XK_Alt_L */
-/* #define MODR XK_Alt_R */
+//#define MODMASK Mod1Mask
+//#define MODL XK_Alt_L
+//#define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -49,6 +49,7 @@ void info(char* msg, ...) {
 // todo
 void warn(char* msg, ...) {
   va_list args;
+  printf("WARN - ");
   va_start(args, msg);
   vprintf(msg, args);
   va_end(args);
@@ -58,12 +59,6 @@ void warn(char* msg, ...) {
 
 // todo
 void fine(char* msg, ...) {
-  va_list args;
-  va_start(args, msg);
-  vprintf(msg, args);
-  va_end(args);
-  printf("\n");
-  fflush(stdout);
 }
 
 typedef struct {
@@ -118,6 +113,7 @@ PI clients_find(Window w) {
 
 // todo pass around a context?
 Display *dsp;
+Window root;
 XColor focused, unfocused, switching;
 unsigned int screen_width, screen_height;
 KeyCode key_m, key_v, key_h, key_esc, key_d, key_modl, key_modr;
@@ -132,6 +128,11 @@ char transient_switching = 0;
 char timer_expired = 0;
 
 void manage_new_window(Window win) {
+  if (clients_find(win).data) {
+    warn("already tracking %x", win);
+    return;
+  }
+
   Client c;
   c.win = win;
 
@@ -144,7 +145,7 @@ void manage_new_window(Window win) {
     c.current_bounds.w = attr.width;
     c.current_bounds.h = attr.height;
   } else {
-    warn("failed to get initial window attributes for %d", win);
+    warn("failed to get initial window attributes for %x", win);
     c.current_bounds.x = -1;
     c.current_bounds.y = -1;
     c.current_bounds.w = -1;
@@ -160,12 +161,12 @@ void manage_new_window(Window win) {
   XSetWindowBorder(dsp, win, unfocused.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
 
-  fine("added new window: %d", win);
+  fine("added new window: %x", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
-  fine("map request for window: %d", win);
+  fine("map request for window: %x", win);
   manage_new_window(win);
   XMapWindow(dsp, win);
 }
@@ -173,7 +174,7 @@ void handle_map_request(XMapRequestEvent* event) {
 void handle_enter_notify(XCrossingEvent* event) {
   Window win = event->window;
   long t = event->time;
-  fine("changing focus on enter-notify to window %d", win);
+  fine("changing focus on enter-notify to window %x", win);
   XSetInputFocus(dsp, win, RevertToParent, t);
 }
 
@@ -216,7 +217,7 @@ void handle_button_press(XButtonEvent* event) {
   if (event->button == 1) {
     Client *c = clients_find(win).data;
     if (!c) {
-      warn("no client for window: %d", win);
+      warn("no client for window: %x", win);
       return;
     }
 
@@ -287,22 +288,20 @@ void handle_button_press(XButtonEvent* event) {
 void handle_button_release(XButtonEvent* event) {
   if (event->button == 1) {
     if (drag_state.win) {
-      info("finish drag");
       drag_state.win = 0;
     }
   } else if (event->button == 3) {
     Window win = event->subwindow;
-    info("lowering window: %d", win);
     XLowerWindow(dsp, win);
   }
 }
 
 void toggle_maximize(Window win, char kind) {
-  fine("toggle maximize for %d", win);
+  fine("toggle maximize for %x", win);
 
   Client *c = clients_find(win).data;
   if (!c) {
-    warn("no client for window: %d", win);
+    warn("no client for window: %x", win);
     return;
   }
 
@@ -355,7 +354,7 @@ void track_focus_change(Window win) {
     // current focus gets 0
     Client *c = clients_find(win).data;
     if (!c) {
-      info("no client for: %d", win);
+      info("no client for newly focused window: %x", win);
       return;
     }
 
@@ -367,7 +366,7 @@ void timer_handler(int signal) {
 }
 
 void timer_has_expired() {
-  info("timer expired");
+  fine("timer expired");
   transient_switching = 0;
   track_focus_change(last_focused_window);
 }
@@ -376,7 +375,7 @@ void timer_has_expired() {
 void switch_next_window() {
   Client *current = clients_find(last_focused_window).data;
   if (!current) {
-    info("no client for last focused window: %d", last_focused_window);
+    info("no client for last focused window: %x", last_focused_window);
     return;
   }
 
@@ -421,20 +420,17 @@ void switch_next_window() {
   assert(next);
 
   Window win = next->win;
-  info("setting focus to %d", win);
+  fine("setting focus to %x", win);
   XRaiseWindow(dsp, win);
   XSetInputFocus(dsp, win, RevertToParent, CurrentTime);
 }
 
 void switch_windows() {
-  info("switching windows");
-
   if (!transient_switching) {
     transient_switching = 1;
   }
 
   // reset the timer
-  info("set timer");
   struct itimerval t;
   t.it_value.tv_sec = 0;
   t.it_value.tv_usec = 600000;
@@ -458,7 +454,7 @@ void log_debug() {
   info("--- debug ---");
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
-    info("%15d %d", c->win, c->focus_time);
+    info("%15x %3d", c->win, c->focus_time);
   }
   info("------");
 }
@@ -478,8 +474,6 @@ void handle_key_release(XKeyEvent *event) {
     log_debug();
   } else if (prime_mod && (kc == key_modl || kc == key_modr)) {
     switch_windows();
-  } else {
-    warn("unhandled key");
   }
 }
 
@@ -622,7 +616,7 @@ void handle_motion(XMotionEvent* event) {
   Window win = drag_state.win;
   Client *c = clients_find(win).data;
   if (!c) {
-    info("no client for: %d", win);
+    info("no client for dragging: %x", win);
     return;
   }
 
@@ -639,13 +633,13 @@ void handle_motion(XMotionEvent* event) {
 
 void handle_focus_in(XFocusChangeEvent* event) {
   if (event->mode == NotifyGrab) {
-    info("discard grab focus-in");
+    fine("discard grab focus-in");
     return;
   }
 
   Window win = event->window;
   last_focused_window = win;
-  info("focus in for window %d", win);
+  fine("focus in for window %x", win);
 
   if (transient_switching) {
     XSetWindowBorder(dsp, win, switching.pixel);
@@ -656,13 +650,13 @@ void handle_focus_in(XFocusChangeEvent* event) {
 
 void handle_focus_out(XFocusChangeEvent* event) {
   if (event->mode == NotifyGrab) {
-    info("discard grab focus-out");
+    fine("discard grab focus-out");
     return;
   }
 
   Window win = event->window;
   XSetWindowBorder(dsp, win, unfocused.pixel);
-  info("focus out for window %d", win);
+  fine("focus out for window %x", win);
 }
 
 void handle_configure(XConfigureEvent* event) {
@@ -673,33 +667,45 @@ void handle_configure(XConfigureEvent* event) {
   int h = event->height;
   Client* c = clients_find(win).data;
   if (!c) {
-    warn("we have no client for window %d", win);
+    info("handle_configure - no client for window %x", win);
     return;
   }
   c->current_bounds.x = x;
   c->current_bounds.y = y;
   c->current_bounds.w = w;
   c->current_bounds.h = h;
-  fine("new position for window %d is [%d %d %d %d]", win, x, y, w, h);
+  fine("new position for window %x is [%d %d %d %d]", win, x, y, w, h);
 }
 
-void handle_destroy(XDestroyWindowEvent* event) {
-  Window win = event->window;
+void remove_window(Window win) {
   PI p = clients_find(win);
   if (!p.data) {
-    warn("no client for window: %d", win);
+    warn("no client for window while removing: %x", win);
     return;
   }
   buffer_remove(&clients, p.index);
-  fine("destroyed window %d", win);
+  fine("destroyed window %x", win);
+}
+
+void handle_destroy(XDestroyWindowEvent* event) {
+  remove_window(event->window);
 }
 
 int error_handler(Display *dsp, XErrorEvent *event) {
-  warn("--- X error ---");
+  warn("X error");
   char buffer[128];
   XGetErrorText(dsp, event->error_code, buffer, 128);
+  // todo malloc a string and log in one go, don't be a wuss
   warn("%d %d %s", event->request_code, event->minor_code, buffer);
   return 0;
+}
+
+void handle_reparent(XReparentEvent *event) {
+  Window win = event->window;
+  if (event->parent != root) {
+    info("removing client after reparent: %x", win);
+    remove_window(win);
+  }
 }
 
 // grab and dispatch all events in the queue
@@ -722,11 +728,9 @@ void handle_xevents() {
       handle_button_release((XButtonEvent*)&event.xbutton);
       break;
     case KeyPress:
-      info("key press");
       handle_key_press((XKeyEvent*)&event.xkey);
       break;
     case KeyRelease:
-      info("key release");
       handle_key_release((XKeyEvent*)&event.xkey);
       break;
     case MotionNotify:
@@ -743,6 +747,9 @@ void handle_xevents() {
       break;
     case DestroyNotify:
       handle_destroy((XDestroyWindowEvent*)&event.xdestroywindow);
+      break;
+    case ReparentNotify:
+      handle_reparent((XReparentEvent*)&event.xreparent);
       break;
     }
   }
@@ -762,11 +769,10 @@ int main(int argc, char** argv) {
 
   XSetErrorHandler(error_handler);
 
-  Window root = XDefaultRootWindow(dsp);
+  root = XDefaultRootWindow(dsp);
   if (!root) {
     fatal("could not open display");
   }
-  info("root window is %d", root);
 
   int default_screen = DefaultScreen(dsp);
 
@@ -822,8 +828,6 @@ int main(int argc, char** argv) {
   }
   XFree(children);
 
-  info("retroot is %d", retroot);
-
   drag_state.win = 0;
 
   XGrabButton(dsp, AnyButton, MODMASK, root, False,
@@ -873,6 +877,7 @@ int main(int argc, char** argv) {
     fds[0].events = POLLIN;
     poll(fds, 1, 100);
 
+    // draw dots for some breathing room in the log
     if (ticker % 100 == 0) info(".");
     ticker++;
   }
