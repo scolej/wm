@@ -10,6 +10,11 @@
 #include <poll.h>
 #include <signal.h>
 
+#define SNAP_DIST 30
+
+// what fraction of window width/height do edge handles occupy?
+#define HANDLE_FRAC 0.2
+
 #define BORDER_WIDTH 4
 #define BORDER_GAP 4
 // todo screen gap
@@ -18,9 +23,9 @@
 #define MODL XK_Super_L
 #define MODR XK_Super_R
 
-// #define MODMASK Mod1Mask
-// #define MODL XK_Alt_L
-// #define MODR XK_Alt_R
+/* #define MODMASK Mod1Mask */
+/* #define MODL XK_Alt_L */
+/* #define MODR XK_Alt_R */
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -115,7 +120,7 @@ PI clients_find(Window w) {
 Display *dsp;
 XColor focused, unfocused, switching;
 unsigned int screen_width, screen_height;
-KeyCode key_m, key_v, key_h, key_esc, key_modl, key_modr;
+KeyCode key_m, key_v, key_h, key_esc, key_d, key_modl, key_modr;
 
 Window last_focused_window = 0;
 
@@ -217,12 +222,11 @@ void handle_button_press(XButtonEvent* event) {
 
     Rectangle bounds = c->current_bounds;
 
-    float r = 0.1;
     int x1, x2, y1, y2;
-    x1 = bounds.x + bounds.w * r;
-    x2 = bounds.x + bounds.w * (1.0 - r);
-    y1 = bounds.y + bounds.h * r;
-    y2 = bounds.y + bounds.h * (1.0 - r);
+    x1 = bounds.x + bounds.w * HANDLE_FRAC;
+    x2 = bounds.x + bounds.w * (1.0 - HANDLE_FRAC);
+    y1 = bounds.y + bounds.h * HANDLE_FRAC;
+    y2 = bounds.y + bounds.h * (1.0 - HANDLE_FRAC);
 
     enum DragHandle dhx;
     if (x < x1) {
@@ -340,6 +344,8 @@ void toggle_maximize(Window win, char kind) {
 }
 
 void track_focus_change(Window win) {
+    XSetWindowBorder(dsp, win, focused.pixel);
+
     // increment all focus counters
     for (unsigned int i = 0; i < clients.length; i++) {
       Client *c = buffer_get(&clients, i);
@@ -352,9 +358,8 @@ void track_focus_change(Window win) {
       info("no client for: %d", win);
       return;
     }
-    c->focus_time = 0;
 
-    XSetWindowBorder(dsp, win, focused.pixel);
+    c->focus_time = 0;
 }
 
 void timer_handler(int signal) {
@@ -365,8 +370,6 @@ void timer_has_expired() {
   info("timer expired");
   transient_switching = 0;
   track_focus_change(last_focused_window);
-  XAllowEvents(dsp, SyncPointer, CurrentTime);
-  //XAllowEvents(dsp, AsyncKeyboard, CurrentTime);
 }
 
 // todo this is a disaster of design
@@ -451,6 +454,15 @@ void handle_key_press(XKeyEvent *event) {
   }
 }
 
+void log_debug() {
+  info("--- debug ---");
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    info("%15d %d", c->win, c->focus_time);
+  }
+  info("------");
+}
+
 void handle_key_release(XKeyEvent *event) {
   Window win = event->subwindow;
   KeyCode kc = event->keycode;
@@ -462,6 +474,8 @@ void handle_key_release(XKeyEvent *event) {
     toggle_maximize(win, MAX_HORI);
   } else if (kc == key_esc) {
     XLowerWindow(dsp, win);
+  } else if (kc == key_d) {
+    log_debug();
   } else if (prime_mod && (kc == key_modl || kc == key_modr)) {
     switch_windows();
   } else {
@@ -614,10 +628,10 @@ void handle_motion(XMotionEvent* event) {
 
   int *ls, *rs, *ts, *bs;
   unsigned int n = make_snap_lists(c, &ls, &rs, &ts, &bs);
-  int l = snap(rect.x, ls, n);
-  int r = snap(rect.x + rect.w - 1, rs, n);
-  int t = snap(rect.y, ts, n);
-  int b = snap(rect.y + rect.h - 1, bs, n);
+  int l = snap(rect.x, ls, n, SNAP_DIST);
+  int r = snap(rect.x + rect.w - 1, rs, n, SNAP_DIST);
+  int t = snap(rect.y, ts, n, SNAP_DIST);
+  int b = snap(rect.y + rect.h - 1, bs, n, SNAP_DIST);
   free(ls);
 
   XMoveResizeWindow(dsp, win, l, t, r - l + 1, b - t + 1);
@@ -825,8 +839,11 @@ int main(int argc, char** argv) {
   key_h = XKeysymToKeycode(dsp, XK_H);
   XGrabKey(dsp, key_h, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
 
-  XGrabKey(dsp, key_esc, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
   key_esc = XKeysymToKeycode(dsp, XK_Escape);
+  XGrabKey(dsp, key_esc, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+
+  key_d = XKeysymToKeycode(dsp, XK_D);
+  XGrabKey(dsp, key_d, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
 
   // todo sync??
   // looks like pressing super first moves focus off the current win

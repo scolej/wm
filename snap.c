@@ -1,12 +1,10 @@
 #include "snap.h"
 #include <stdlib.h>
 
-#define SNAP_RANGE 15
-
-int snap(int x, int* xs, int n) {
-  unsigned int d = SNAP_RANGE;
+int snap(int x, int* xs, unsigned int n, unsigned int dist) {
+  unsigned int d = dist;
   int r = x;
-  for (int i = 0; i < n; i++) {
+  for (unsigned int i = 0; i < n; i++) {
     int c = xs[i];
     unsigned int dd = abs(c - x);
     if (dd < d) {
