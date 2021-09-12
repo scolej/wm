@@ -354,16 +354,26 @@ void timer_has_expired() {
   //XAllowEvents(dsp, AsyncKeyboard, CurrentTime);
 }
 
+// todo this is a disaster of design
 void switch_next_window() {
   Client *current = clients_find(last_focused_window).data;
   if (!current) {
     info("no client for last focused window: %d", last_focused_window);
     return;
   }
+
   unsigned int ct = current->focus_time;
 
-  // find the client with lowest focus time which is greater than this focus time
-  unsigned int t = 1000; // fixme
+  // find the oldest client
+  unsigned int oldest = 0;
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    unsigned int ft = c->focus_time;
+    if (ft > oldest) oldest = ft;
+  }
+
+  // find the most recently focused client
+  unsigned int t = oldest + 1;
   Client *next = NULL;
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
@@ -378,9 +388,19 @@ void switch_next_window() {
   }
 
   if (!next) {
-    warn("found no client for next");
-    return;
+    info("wrap");
+    t = oldest;
+    for (unsigned int i = 0; i < clients.length; i++) {
+      Client *c = buffer_get(&clients, i);
+      unsigned int ft = c->focus_time;
+      if (ft < t) {
+        t = ft;
+        next = c;
+      }
+    }
   }
+
+  assert(next);
 
   Window win = next->win;
   info("setting focus to %d", win);
