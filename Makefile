@@ -1,12 +1,15 @@
-flags=-Wall -g -Werror
+flags=-Wall -g -Werror -std=gnu99
 cc=gcc
 
 all : wm test
 
 test : test_buffer test_snap
 
-wm : wm.c snap.c buffer.c
+wm : wm.o snap.o buffer.c
 	$(cc) $(flags) -lX11 -o $@ $^
+
+%.o : %.c
+	$(cc) $(flags) -c -o $@ $<
 
 test_buffer : test_buffer.c buffer.c
 	$(cc) $(flags) -lX11 -o $@ $^

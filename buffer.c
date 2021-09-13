@@ -2,6 +2,10 @@
 #include <assert.h>
 #include <string.h>
 
+// todo
+// it seems this may be completely wrong
+// aliasing & UB ???
+
 void buffer_init(Buffer* buf, unsigned long capacity, unsigned long elem_size) {
   buf->length = 0;
   buf->capacity = capacity;
