@@ -6,7 +6,7 @@
 // it seems this may be completely wrong
 // aliasing & UB ???
 
-void buffer_init(Buffer* buf, unsigned long capacity, unsigned long elem_size) {
+void buffer_init(Buffer* buf, unsigned long capacity, size_t elem_size) {
   buf->length = 0;
   buf->capacity = capacity;
   buf->elem_size = elem_size;
@@ -32,9 +32,11 @@ void buffer_add(Buffer* buf, void* data) {
 }
 
 void buffer_remove(Buffer* buf, unsigned long index) {
-  unsigned long l = buf->length;
+  assert(index < buf->length);
+  unsigned long last = buf->length - 1;
   size_t s = buf->elem_size;
-  assert(index < l);
-  memcpy(&buf->data[index * s], &buf->data[--l * s], s);
-  buf->length = l;
+  if (index != last) {
+    memcpy(&buf->data[index * s], &buf->data[last * s], s);
+  }
+  buf->length = last;
 }

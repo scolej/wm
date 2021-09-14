@@ -14,7 +14,7 @@ typedef struct {
   size_t elem_size;
 } Buffer;
 
-void buffer_init(Buffer* buf, unsigned long capacity, unsigned long elem_size);
+void buffer_init(Buffer* buf, unsigned long capacity, size_t elem_size);
 
 void buffer_free(Buffer* buf);
 
