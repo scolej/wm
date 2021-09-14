@@ -23,9 +23,9 @@
 #define MODL XK_Super_L
 #define MODR XK_Super_R
 
-//#define MODMASK Mod1Mask
-//#define MODL XK_Alt_L
-//#define MODR XK_Alt_R
+// #define MODMASK Mod1Mask
+// #define MODL XK_Alt_L
+// #define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -98,12 +98,30 @@ typedef struct {
 
 // Finds a client by the window it represents.
 PI clients_find(Window w) {
-  PI p;
-  p.data = NULL;
-  p.index = 0;
+  PI p = {
+    .data = NULL,
+    .index = 0,
+  };
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
     if (c->win == w) {
+      p.data = c;
+      p.index = i;
+    }
+  }
+  return p;
+}
+
+// Find the client with the lowest focus time.
+PI clients_most_recent() {
+  PI p = {
+    .data = NULL,
+    .index = 0,
+  };
+  unsigned int t = 100000; // fixme
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    if (c->focus_time < t) {
       p.data = c;
       p.index = i;
     }
@@ -164,11 +182,28 @@ void manage_new_window(Window win) {
   fine("added new window: %x", win);
 }
 
+void remove_window(Window win) {
+  PI p = clients_find(win);
+  if (!p.data) {
+    fine("no client for window while removing: %x", win);
+    return;
+  }
+  buffer_remove(&clients, p.index);
+  fine("destroyed window %x", win);
+}
+
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
   fine("map request for window: %x", win);
-  manage_new_window(win);
   XMapWindow(dsp, win);
+}
+
+void handle_map_notify(XMapEvent* event) {
+  manage_new_window(event->window);
+}
+
+void handle_unmap_notify(XUnmapEvent* event) {
+  remove_window(event->window);
 }
 
 void handle_enter_notify(XCrossingEvent* event) {
@@ -343,22 +378,29 @@ void toggle_maximize(Window win, char kind) {
 }
 
 void track_focus_change(Window win) {
-    XSetWindowBorder(dsp, win, focused.pixel);
+  Client *cur = clients_find(win).data;
 
-    // increment all focus counters
-    for (unsigned int i = 0; i < clients.length; i++) {
-      Client *c = buffer_get(&clients, i);
-      c->focus_time++;
-    }
-
-    // current focus gets 0
-    Client *c = clients_find(win).data;
-    if (!c) {
-      info("no client for newly focused window: %x", win);
+  if (!cur) {
+    info("track_focus_change - "
+         "focusing a window for which we have no client: %x",
+         win);
+    cur = clients_most_recent().data;
+    if (!cur) {
+      // there are no clients
       return;
     }
+    win = cur->win;
+  }
 
-    c->focus_time = 0;
+  XSetWindowBorder(dsp, win, focused.pixel);
+
+  // increment all focus counters
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    c->focus_time++;
+  }
+
+  cur->focus_time = 0;
 }
 
 void timer_handler(int signal) {
@@ -376,7 +418,11 @@ void switch_next_window() {
   Client *current = clients_find(last_focused_window).data;
   if (!current) {
     info("no client for last focused window: %x", last_focused_window);
-    return;
+    current = clients_most_recent().data;
+    if (!current) {
+      // no clients
+      return;
+    }
   }
 
   unsigned int ct = current->focus_time;
@@ -406,19 +452,14 @@ void switch_next_window() {
 
   if (!next) {
     info("wrap");
-    t = oldest;
-    for (unsigned int i = 0; i < clients.length; i++) {
-      Client *c = buffer_get(&clients, i);
-      unsigned int ft = c->focus_time;
-      if (ft < t) {
-        t = ft;
-        next = c;
-      }
+    next = clients_most_recent().data;
+    if (!next) {
+      info("no clients");
+      return;
     }
   }
 
   assert(next);
-
   Window win = next->win;
   fine("setting focus to %x", win);
   XRaiseWindow(dsp, win);
@@ -677,16 +718,6 @@ void handle_configure(XConfigureEvent* event) {
   fine("new position for window %x is [%d %d %d %d]", win, x, y, w, h);
 }
 
-void remove_window(Window win) {
-  PI p = clients_find(win);
-  if (!p.data) {
-    warn("no client for window while removing: %x", win);
-    return;
-  }
-  buffer_remove(&clients, p.index);
-  fine("destroyed window %x", win);
-}
-
 void handle_destroy(XDestroyWindowEvent* event) {
   remove_window(event->window);
 }
@@ -717,6 +748,12 @@ void handle_xevents() {
     switch (event.type) {
     case MapRequest:
       handle_map_request((XMapRequestEvent*)&event.xmaprequest);
+      break;
+    case MapNotify:
+      handle_map_notify((XMapEvent*)&event.xmap);
+      break;
+    case UnmapNotify:
+      handle_unmap_notify((XUnmapEvent*)&event.xunmap);
       break;
     case EnterNotify:
       handle_enter_notify((XCrossingEvent*)&event.xcrossing);
@@ -848,9 +885,6 @@ int main(int argc, char** argv) {
 
   key_d = XKeysymToKeycode(dsp, XK_D);
   XGrabKey(dsp, key_d, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
-
-  // todo sync??
-  // looks like pressing super first moves focus off the current win
 
   key_modl = XKeysymToKeycode(dsp, MODL);
   XGrabKey(dsp, key_modl, 0, root, False, GrabModeAsync, GrabModeAsync);
