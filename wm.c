@@ -195,6 +195,18 @@ void remove_window(Window win) {
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
   fine("map request for window: %x", win);
+
+  XSizeHints *sh = XAllocSizeHints();
+  long supplied;
+  Status st = XGetWMNormalHints(dsp, win, sh, &supplied);
+  if (st) {
+    unsigned int w, h;
+    w = sh->base_width;
+    h = sh->base_height;
+    XResizeWindow(dsp, win, w, h);
+  }
+  XFree(sh);
+
   XMapWindow(dsp, win);
 }
 
@@ -474,7 +486,7 @@ void switch_windows() {
   // reset the timer
   struct itimerval t;
   t.it_value.tv_sec = 0;
-  t.it_value.tv_usec = 600000;
+  t.it_value.tv_usec = 800000;
   t.it_interval.tv_sec = 0;
   t.it_interval.tv_usec = 0;
   setitimer(ITIMER_REAL, &t, NULL);
