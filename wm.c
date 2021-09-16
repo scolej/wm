@@ -15,7 +15,7 @@
 // what fraction of window width/height do edge handles occupy?
 #define HANDLE_FRAC 0.2
 
-#define BORDER_WIDTH 4
+#define BORDER_WIDTH 2
 #define BORDER_GAP 4
 // todo screen gap
 
@@ -192,21 +192,34 @@ void remove_window(Window win) {
   fine("destroyed window %x", win);
 }
 
-void handle_map_request(XMapRequestEvent* event) {
-  Window win = event->window;
-  fine("map request for window: %x", win);
-
+void fetch_apply_normal_hints(Window win) {
   XSizeHints *sh = XAllocSizeHints();
   long supplied;
   Status st = XGetWMNormalHints(dsp, win, sh, &supplied);
-  if (st) {
-    unsigned int w, h;
+  if (!st) {
+    goto clean;
+  }
+
+  unsigned int w, h;
+  if (sh->flags & PBaseSize) {
     w = sh->base_width;
     h = sh->base_height;
-    XResizeWindow(dsp, win, w, h);
+  } else if (sh->flags & PMinSize) {
+    w = sh->min_width;
+    h = sh->min_height;
+  } else {
+    goto clean;
   }
-  XFree(sh);
+  XResizeWindow(dsp, win, w, h);
 
+ clean:
+  XFree(sh);
+}
+
+void handle_map_request(XMapRequestEvent* event) {
+  Window win = event->window;
+  fine("map request for window: %x", win);
+  fetch_apply_normal_hints(win);
   XMapWindow(dsp, win);
 }
 
