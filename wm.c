@@ -19,13 +19,13 @@
 #define BORDER_GAP 4
 // todo screen gap
 
-#define MODMASK Mod4Mask
-#define MODL XK_Super_L
-#define MODR XK_Super_R
+// #define MODMASK Mod4Mask
+// #define MODL XK_Super_L
+// #define MODR XK_Super_R
 
-// #define MODMASK Mod1Mask
-// #define MODL XK_Alt_L
-// #define MODR XK_Alt_R
+#define MODMASK Mod1Mask
+#define MODL XK_Alt_L
+#define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -132,7 +132,7 @@ PI clients_most_recent() {
 // todo pass around a context?
 Display *dsp;
 Window root;
-XColor focused, unfocused, switching;
+XColor focused_colour, unfocused_colour, switching_colour;
 unsigned int screen_width, screen_height;
 KeyCode key_m, key_v, key_h, key_esc, key_d, key_modl, key_modr;
 
@@ -176,7 +176,7 @@ void manage_new_window(Window win) {
   buffer_add(&clients, &c);
 
   XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
-  XSetWindowBorder(dsp, win, unfocused.pixel);
+  XSetWindowBorder(dsp, win, unfocused_colour.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
 
   fine("added new window: %x", win);
@@ -402,30 +402,18 @@ void toggle_maximize(Window win, char kind) {
   XMoveResizeWindow(dsp, win, new.x, new.y, new.w, new.h);
 }
 
-void track_focus_change(Window win) {
-  Client *cur = clients_find(win).data;
+void track_focus_change(Client *focused) {
+  Window win = focused->win;
 
-  if (!cur) {
-    info("track_focus_change - "
-         "focusing a window for which we have no client: %x",
-         win);
-    cur = clients_most_recent().data;
-    if (!cur) {
-      // there are no clients
-      return;
-    }
-    win = cur->win;
-  }
+  XSetWindowBorder(dsp, win, focused_colour.pixel);
 
-  XSetWindowBorder(dsp, win, focused.pixel);
-
-  // increment all focus counters
+  // increment all other focus counters
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
     c->focus_time++;
   }
 
-  cur->focus_time = 0;
+  focused->focus_time = 0;
 }
 
 void timer_handler(int signal) {
@@ -435,8 +423,20 @@ void timer_handler(int signal) {
 void timer_has_expired() {
   fine("timer expired");
   transient_switching = 0;
-  track_focus_change(last_focused_window);
+
+  Client *c = clients_find(last_focused_window).data;
+  if (c) {
+    track_focus_change(c);
+  } else {
+    info("timer expired with focus on un-tracked window: %d", last_focused_window);
+  }
 }
+
+// builds a list of windows with recently windows at the front
+// Window* clients_in_focus_order(unsigned int *count_return) {
+//   unsigned int count = clients.length;
+//   *count_return = count;
+// }
 
 // todo this is a disaster of design
 void switch_next_window() {
@@ -697,7 +697,7 @@ void handle_motion(XMotionEvent* event) {
   XMoveResizeWindow(dsp, win, l, t, r - l + 1, b - t + 1);
 }
 
-void handle_focus_in(XFocusChangeEvent* event) {
+void handle_focus_in(XFocusChangeEvent *event) {
   if (event->mode == NotifyGrab) {
     fine("discard grab focus-in");
     return;
@@ -708,9 +708,16 @@ void handle_focus_in(XFocusChangeEvent* event) {
   fine("focus in for window %x", win);
 
   if (transient_switching) {
-    XSetWindowBorder(dsp, win, switching.pixel);
+    // focus change is temporary
+    XSetWindowBorder(dsp, win, switching_colour.pixel);
+    return;
+  }
+
+  Client *c = clients_find(win).data;
+  if (c) {
+    track_focus_change(c);
   } else {
-    track_focus_change(win);
+    info("focus-in for un-tracked window: %d", win);
   }
 }
 
@@ -721,7 +728,7 @@ void handle_focus_out(XFocusChangeEvent* event) {
   }
 
   Window win = event->window;
-  XSetWindowBorder(dsp, win, unfocused.pixel);
+  XSetWindowBorder(dsp, win, unfocused_colour.pixel);
   fine("focus out for window %x", win);
 }
 
@@ -731,15 +738,18 @@ void handle_configure(XConfigureEvent* event) {
   int y = event->y;
   int w = event->width;
   int h = event->height;
+
   Client* c = clients_find(win).data;
   if (!c) {
-    info("handle_configure - no client for window %x", win);
+    fine("handle_configure - no client for window %x", win);
     return;
   }
+
   c->current_bounds.x = x;
   c->current_bounds.y = y;
   c->current_bounds.w = w;
   c->current_bounds.h = h;
+
   fine("new position for window %x is [%d %d %d %d]", win, x, y, w, h);
 }
 
@@ -748,18 +758,16 @@ void handle_destroy(XDestroyWindowEvent* event) {
 }
 
 int error_handler(Display *dsp, XErrorEvent *event) {
-  warn("X error");
   char buffer[128];
   XGetErrorText(dsp, event->error_code, buffer, 128);
-  // todo malloc a string and log in one go, don't be a wuss
-  warn("%d %d %s", event->request_code, event->minor_code, buffer);
+  warn("XError %d %d %s", event->request_code, event->minor_code, buffer);
   return 0;
 }
 
 void handle_reparent(XReparentEvent *event) {
   Window win = event->window;
   if (event->parent != root) {
-    info("removing client after reparent: %x", win);
+    info("removing client after reparent for window: %x", win);
     remove_window(win);
   }
 }
@@ -856,7 +864,7 @@ int main(int argc, char** argv) {
   if (!st) {
     fatal("could not allocate colour");
   }
-  focused = col;
+  focused_colour = col;
 
   col.red = 30000;
   col.green = 30000;
@@ -865,7 +873,7 @@ int main(int argc, char** argv) {
   if (!st) {
     fatal("could not allocate colour");
   }
-  unfocused = col;
+  unfocused_colour = col;
 
   col.red = 65535;
   col.green = 0;
@@ -874,7 +882,7 @@ int main(int argc, char** argv) {
   if (!st) {
     fatal("could not allocate colour");
   }
-  switching = col;
+  switching_colour = col;
 
   buffer_init(&clients, 500, sizeof(Client));
 
@@ -930,6 +938,10 @@ int main(int argc, char** argv) {
 
     handle_xevents();
 
+    // todo - what to do about this gap here?
+    // ie: XPending returns nothing, then before we start polling,
+    // X writes a new event.
+
     // sleep, but not if there's incoming data
     struct pollfd fds[1];
     fds[0].fd = xfd;
@@ -937,7 +949,6 @@ int main(int argc, char** argv) {
     poll(fds, 1, 100);
 
     // draw dots for some breathing room in the log
-    if (ticker % 100 == 0) info(".");
-    ticker++;
+    if (++ticker % 100 == 0) info(".");
   }
 }
