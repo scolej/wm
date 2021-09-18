@@ -81,13 +81,10 @@ typedef struct {
   // bounds without any maximization applied.
   // only non-zero after a maximization has been applied.
   Rectangle orig_bounds;
-
-  unsigned int focus_time;
 } Client;
-// todo
-// last focus time
 
 Buffer clients;
+Buffer window_focus_history;
 
 // Pair of pointer and array index.
 // todo smell?
@@ -112,21 +109,10 @@ PI clients_find(Window w) {
   return p;
 }
 
-// Find the client with the lowest focus time.
+// Finds the client which was most recently focused.
 PI clients_most_recent() {
-  PI p = {
-    .data = NULL,
-    .index = 0,
-  };
-  unsigned int t = 100000; // fixme
-  for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
-    if (c->focus_time < t) {
-      p.data = c;
-      p.index = i;
-    }
-  }
-  return p;
+  Window* w = buffer_get(&window_focus_history, 0);
+  return clients_find(*w);
 }
 
 // todo pass around a context?
@@ -141,6 +127,9 @@ Window last_focused_window = 0;
 // we'll set this to 1 when we start cycling through windows.
 // when timer expires, we'll set it back to 0 and update the window's focus time.
 char transient_switching = 0;
+
+// index into window_focus_history
+unsigned int transient_switching_index = 0;
 
 // flag indicating timer has expired
 char timer_expired = 0;
@@ -171,9 +160,10 @@ void manage_new_window(Window win) {
   }
 
   c.max_state = MAX_NONE;
-  c.focus_time = 0;
 
   buffer_add(&clients, &c);
+  buffer_add(&window_focus_history, &win);
+  assert(clients.length == window_focus_history.length);
 
   XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
@@ -189,6 +179,17 @@ void remove_window(Window win) {
     return;
   }
   buffer_remove(&clients, p.index);
+
+  for (unsigned int i = 0; i < window_focus_history.length; i++) {
+    Window* w = buffer_get(&window_focus_history, i);
+    if (win == *w) {
+      buffer_remove(&window_focus_history, i);
+      break;
+    }
+  }
+
+  assert(clients.length == window_focus_history.length);
+
   fine("destroyed window %x", win);
 }
 
@@ -202,9 +203,11 @@ void fetch_apply_normal_hints(Window win) {
 
   unsigned int w, h;
   if (sh->flags & PBaseSize) {
+    info("using base size");
     w = sh->base_width;
     h = sh->base_height;
   } else if (sh->flags & PMinSize) {
+    info("using minimum size");
     w = sh->min_width;
     h = sh->min_height;
   } else {
@@ -407,13 +410,13 @@ void track_focus_change(Client *focused) {
 
   XSetWindowBorder(dsp, win, focused_colour.pixel);
 
-  // increment all other focus counters
-  for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
-    c->focus_time++;
+  for (unsigned int i = 0; i < window_focus_history.length; i++) {
+    Window* w = buffer_get(&window_focus_history, i);
+    if (win == *w) {
+      buffer_bring_to_front(&window_focus_history, i);
+      break;
+    }
   }
-
-  focused->focus_time = 0;
 }
 
 void timer_handler(int signal) {
@@ -432,60 +435,13 @@ void timer_has_expired() {
   }
 }
 
-// builds a list of windows with recently windows at the front
-// Window* clients_in_focus_order(unsigned int *count_return) {
-//   unsigned int count = clients.length;
-//   *count_return = count;
-// }
-
-// todo this is a disaster of design
 void switch_next_window() {
-  Client *current = clients_find(last_focused_window).data;
-  if (!current) {
-    info("no client for last focused window: %x", last_focused_window);
-    current = clients_most_recent().data;
-    if (!current) {
-      // no clients
-      return;
-    }
+  if (++transient_switching_index >= window_focus_history.length) {
+    transient_switching_index = 0;
   }
 
-  unsigned int ct = current->focus_time;
+  Window win = *(Window*)buffer_get(&window_focus_history, transient_switching_index);
 
-  // find the oldest client
-  unsigned int oldest = 0;
-  for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
-    unsigned int ft = c->focus_time;
-    if (ft > oldest) oldest = ft;
-  }
-
-  // find the most recently focused client
-  unsigned int t = oldest + 1;
-  Client *next = NULL;
-  for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
-    if (c == current) {
-      continue;
-    }
-    unsigned int ft = c->focus_time;
-    if (ft > ct && ft < t) {
-      t = ft;
-      next = c;
-    }
-  }
-
-  if (!next) {
-    info("wrap");
-    next = clients_most_recent().data;
-    if (!next) {
-      info("no clients");
-      return;
-    }
-  }
-
-  assert(next);
-  Window win = next->win;
   fine("setting focus to %x", win);
   XRaiseWindow(dsp, win);
   XSetInputFocus(dsp, win, RevertToParent, CurrentTime);
@@ -494,6 +450,7 @@ void switch_next_window() {
 void switch_windows() {
   if (!transient_switching) {
     transient_switching = 1;
+    transient_switching_index = 0;
   }
 
   // reset the timer
@@ -520,7 +477,7 @@ void log_debug() {
   info("--- debug ---");
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
-    info("%15x %3d", c->win, c->focus_time);
+    info("%15x", c->win);
   }
   info("------");
 }
@@ -885,6 +842,7 @@ int main(int argc, char** argv) {
   switching_colour = col;
 
   buffer_init(&clients, 500, sizeof(Client));
+  buffer_init(&window_focus_history, 500, sizeof(Window));
 
   Window retroot, retparent;
   Window* children;
