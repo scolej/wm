@@ -19,9 +19,9 @@
 #define BORDER_GAP 4
 // todo screen gap
 
-// #define MODMASK Mod4Mask
-// #define MODL XK_Super_L
-// #define MODR XK_Super_R
+/* #define MODMASK Mod4Mask */
+/* #define MODL XK_Super_L */
+/* #define MODR XK_Super_R */
 
 #define MODMASK Mod1Mask
 #define MODL XK_Alt_L
@@ -71,16 +71,16 @@ typedef struct {
 #define MAX_HORI 3
 
 typedef struct {
-  Window win;
-
   Rectangle current_bounds;
-
-  // maximization state
-  char max_state;
 
   // bounds without any maximization applied.
   // only non-zero after a maximization has been applied.
   Rectangle orig_bounds;
+
+  Window win;
+
+  // maximization state
+  char max_state;
 } Client;
 
 Buffer clients;
@@ -195,6 +195,7 @@ void remove_window(Window win) {
 
 void fetch_apply_normal_hints(Window win) {
   XSizeHints *sh = XAllocSizeHints();
+  assert(sh);
   long supplied;
   Status st = XGetWMNormalHints(dsp, win, sh, &supplied);
   if (!st) {
@@ -483,7 +484,7 @@ void log_debug() {
 }
 
 void handle_key_release(XKeyEvent *event) {
-  Window win = event->subwindow;
+  Window win = *(Window*)buffer_get(&window_focus_history, 0);
   KeyCode kc = event->keycode;
   if (kc == key_m) {
     toggle_maximize(win, MAX_BOTH);
