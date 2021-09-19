@@ -28,6 +28,7 @@ typedef struct {
   unsigned int index;
 } PI;
 
+// todo hide these away
 extern Buffer clients;
 extern Buffer window_focus_history;
 

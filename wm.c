@@ -16,17 +16,17 @@
 // what fraction of window width/height do edge handles occupy?
 #define HANDLE_FRAC 0.2
 
-#define BORDER_WIDTH 2
-#define BORDER_GAP 4
+#define BORDER_WIDTH 4
+#define BORDER_GAP 2
 // todo screen gap
 
-/* #define MODMASK Mod4Mask */
-/* #define MODL XK_Super_L */
-/* #define MODR XK_Super_R */
+#define MODMASK Mod4Mask
+#define MODL XK_Super_L
+#define MODR XK_Super_R
 
-#define MODMASK Mod1Mask
-#define MODL XK_Alt_L
-#define MODR XK_Alt_R
+/* #define MODMASK Mod1Mask */
+/* #define MODL XK_Alt_L */
+/* #define MODR XK_Alt_R */
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -72,7 +72,6 @@ Display *dsp;
 Window root;
 XColor focused_colour, unfocused_colour, switching_colour;
 unsigned int screen_width, screen_height;
-KeyCode key_m, key_v, key_h, key_esc, key_d, key_modl, key_modr;
 
 Window last_focused_window = 0;
 
@@ -383,6 +382,11 @@ void switch_next_window() {
 }
 
 void switch_windows() {
+  // todo - this is special handling for binding mod-key directly
+  if (!prime_mod) {
+    return;
+  }
+
   if (!transient_switching) {
     transient_switching = 1;
     transient_switching_index = 0;
@@ -399,13 +403,29 @@ void switch_windows() {
   switch_next_window();
 }
 
-void handle_key_press(XKeyEvent *event) {
-  KeyCode kc = event->keycode;
-  if (kc == key_modl || kc == key_modr) {
-    prime_mod = 1;
-  } else {
-    prime_mod = 0;
-  }
+void maximize() {
+  Window win = *(Window*)buffer_get(&window_focus_history, 0);
+  toggle_maximize(win, MAX_BOTH);
+}
+
+void maximize_horiz() {
+  Window win = *(Window*)buffer_get(&window_focus_history, 0);
+  toggle_maximize(win, MAX_HORI);
+}
+
+void maximize_vert() {
+  Window win = *(Window*)buffer_get(&window_focus_history, 0);
+  toggle_maximize(win, MAX_VERT);
+}
+
+void close_window() {
+  Window win = *(Window*)buffer_get(&window_focus_history, 0);
+  XDestroyWindow(dsp, win);
+}
+
+void lower() {
+  Window win = *(Window*)buffer_get(&window_focus_history, 0);
+  XLowerWindow(dsp, win);
 }
 
 void log_debug() {
@@ -417,21 +437,44 @@ void log_debug() {
   info("------");
 }
 
-void handle_key_release(XKeyEvent *event) {
-  Window win = *(Window*)buffer_get(&window_focus_history, 0);
+typedef struct {
+  KeySym sym;
+  unsigned int mods;
+
+  // filled during init
+  KeyCode kc;
+
+  void (*binding)();
+} Key;
+
+Key keys[] = {
+  { XK_M, MODMASK, 0, maximize },
+  { XK_V, MODMASK, 0, maximize_vert},
+  { XK_H, MODMASK, 0, maximize_horiz},
+  { XK_D, MODMASK, 0, log_debug},
+  { XK_Q, MODMASK, 0, close_window},
+  { XK_Escape, MODMASK, 0, lower },
+  { MODL, 0, 0, switch_windows },
+  { MODR, 0, 0, switch_windows },
+};
+
+KeyCode kc_modl, kc_modr;
+
+void handle_key_press(XKeyEvent *event) {
   KeyCode kc = event->keycode;
-  if (kc == key_m) {
-    toggle_maximize(win, MAX_BOTH);
-  } else if (kc == key_v) {
-    toggle_maximize(win, MAX_VERT);
-  } else if (kc == key_h) {
-    toggle_maximize(win, MAX_HORI);
-  } else if (kc == key_esc) {
-    XLowerWindow(dsp, win);
-  } else if (kc == key_d) {
-    log_debug();
-  } else if (prime_mod && (kc == key_modl || kc == key_modr)) {
-    switch_windows();
+  if (kc == kc_modl || kc == kc_modr) {
+    prime_mod = 1;
+  } else {
+    prime_mod = 0;
+  }
+}
+
+void handle_key_release(XKeyEvent *event) {
+  for (unsigned int i = 0; i < sizeof(keys) / sizeof(Key); i++) {
+    Key k = keys[i];
+    if (k.kc == event->keycode) {
+      (k.binding)();
+    }
   }
 }
 
@@ -749,9 +792,9 @@ int main(int argc, char** argv) {
   XColor col;
   Status st;
 
-  col.red = 40000;
-  col.green = 0;
-  col.blue = 0;
+  col.red = 20000;
+  col.green = 20000;
+  col.blue = 40000;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
     fatal("could not allocate colour");
@@ -767,9 +810,9 @@ int main(int argc, char** argv) {
   }
   unfocused_colour = col;
 
-  col.red = 65535;
+  col.red = 0;
   col.green = 0;
-  col.blue = 0;
+  col.blue = 60000;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
     fatal("could not allocate colour");
@@ -797,26 +840,18 @@ int main(int argc, char** argv) {
               ButtonPressMask | ButtonReleaseMask | Button1MotionMask,
               GrabModeAsync, GrabModeAsync, None, None);
 
-  key_m = XKeysymToKeycode(dsp, XK_M);
-  XGrabKey(dsp, key_m, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+  for (unsigned int i = 0; i < sizeof(keys) / sizeof(Key); i++) {
+    Key k = keys[i];
+    KeyCode kc = XKeysymToKeycode(dsp, k.sym);
 
-  key_v = XKeysymToKeycode(dsp, XK_V);
-  XGrabKey(dsp, key_v, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+    Key* kp = &keys[i];
+    kp->kc = kc;
 
-  key_h = XKeysymToKeycode(dsp, XK_H);
-  XGrabKey(dsp, key_h, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
+    XGrabKey(dsp, kc, k.mods, root, False, GrabModeAsync, GrabModeAsync);
+  }
 
-  key_esc = XKeysymToKeycode(dsp, XK_Escape);
-  XGrabKey(dsp, key_esc, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
-
-  key_d = XKeysymToKeycode(dsp, XK_D);
-  XGrabKey(dsp, key_d, MODMASK, root, False, GrabModeAsync, GrabModeAsync);
-
-  key_modl = XKeysymToKeycode(dsp, MODL);
-  XGrabKey(dsp, key_modl, 0, root, False, GrabModeAsync, GrabModeAsync);
-
-  key_modr = XKeysymToKeycode(dsp, MODR);
-  XGrabKey(dsp, key_modr, 0, root, False, GrabModeAsync, GrabModeAsync);
+  kc_modl = XKeysymToKeycode(dsp, MODL);
+  kc_modr = XKeysymToKeycode(dsp, MODR);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 
