@@ -1,14 +1,15 @@
 #include "buffer.h"
+#include "clients.h"
 #include "snap.h"
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <assert.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/time.h>
-#include <poll.h>
-#include <signal.h>
 
 #define SNAP_DIST 30
 
@@ -61,59 +62,10 @@ void warn(char* msg, ...) {
 void fine(char* msg, ...) {
 }
 
-typedef struct {
-  int x, y, w, h;
-} Rectangle;
-
 #define MAX_NONE 0
 #define MAX_BOTH 1
 #define MAX_VERT 2
 #define MAX_HORI 3
-
-typedef struct {
-  Rectangle current_bounds;
-
-  // bounds without any maximization applied.
-  // only non-zero after a maximization has been applied.
-  Rectangle orig_bounds;
-
-  Window win;
-
-  // maximization state
-  char max_state;
-} Client;
-
-Buffer clients;
-Buffer window_focus_history;
-
-// Pair of pointer and array index.
-// todo smell?
-typedef struct {
-  void* data;
-  unsigned int index;
-} PI;
-
-// Finds a client by the window it represents.
-PI clients_find(Window w) {
-  PI p = {
-    .data = NULL,
-    .index = 0,
-  };
-  for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
-    if (c->win == w) {
-      p.data = c;
-      p.index = i;
-    }
-  }
-  return p;
-}
-
-// Finds the client which was most recently focused.
-PI clients_most_recent() {
-  Window* w = buffer_get(&window_focus_history, 0);
-  return clients_find(*w);
-}
 
 // todo pass around a context?
 Display *dsp;
@@ -161,9 +113,7 @@ void manage_new_window(Window win) {
 
   c.max_state = MAX_NONE;
 
-  buffer_add(&clients, &c);
-  buffer_add(&window_focus_history, &win);
-  assert(clients.length == window_focus_history.length);
+  clients_add(&c);
 
   XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
@@ -173,23 +123,7 @@ void manage_new_window(Window win) {
 }
 
 void remove_window(Window win) {
-  PI p = clients_find(win);
-  if (!p.data) {
-    fine("no client for window while removing: %x", win);
-    return;
-  }
-  buffer_remove(&clients, p.index);
-
-  for (unsigned int i = 0; i < window_focus_history.length; i++) {
-    Window* w = buffer_get(&window_focus_history, i);
-    if (win == *w) {
-      buffer_remove(&window_focus_history, i);
-      break;
-    }
-  }
-
-  assert(clients.length == window_focus_history.length);
-
+  clients_del(win);
   fine("destroyed window %x", win);
 }
 

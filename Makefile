@@ -5,7 +5,7 @@ all : wm test
 
 test : test_buffer test_snap
 
-wm : wm.o snap.o buffer.c
+wm : wm.o snap.o buffer.c clients.o
 	$(cc) $(flags) -lX11 -o $@ $^
 
 %.o : %.c
