@@ -30,4 +30,7 @@ void buffer_remove(Buffer* buf, unsigned long index);
 // bring the element at given index to the front and push everything else back
 void buffer_bring_to_front(Buffer* buf, unsigned long index);
 
+// send the element at given index to the back and push everything else forward
+void buffer_send_to_back(Buffer* buf, unsigned long index);
+
 #endif

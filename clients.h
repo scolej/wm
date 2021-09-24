@@ -38,4 +38,10 @@ void clients_del(Window win);
 PI clients_find(Window win);
 PI clients_most_recent();
 
+Window window_history_get(unsigned int i);
+
+// raise/lower win to the top/back of the focus history list
+void clients_focus_raise(Window win);
+void clients_focus_lower(Window win);
+
 #endif

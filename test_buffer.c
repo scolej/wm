@@ -115,9 +115,45 @@ void bring_to_front() {
   buffer_free(&buf);
 }
 
+void send_to_back() {
+  msg("send_to_back");
+
+  Buffer buf;
+  int x;
+
+  buffer_init(&buf, 4, sizeof(int));
+  x = 100;
+  buffer_add(&buf, &x);
+  x = 200;
+  buffer_add(&buf, &x);
+  x = 300;
+  buffer_add(&buf, &x);
+  x = 400;
+  buffer_add(&buf, &x);
+
+  msg("el 0");
+  buffer_send_to_back(&buf, 0);
+  assert_buffer_elements(&buf, 200, 300, 400, 100);
+
+  msg("el 1");
+  buffer_send_to_back(&buf, 1);
+  assert_buffer_elements(&buf, 200, 400, 100, 300);
+
+  msg("el 2");
+  buffer_send_to_back(&buf, 2);
+  assert_buffer_elements(&buf, 200, 400, 300, 100);
+
+  msg("el 3");
+  buffer_send_to_back(&buf, 3);
+  assert_buffer_elements(&buf, 200, 400, 300, 100);
+
+  buffer_free(&buf);
+}
+
 int main(int argc, char** argv) {
   basic();
   remove_last();
   bring_to_front();
+  send_to_back();
   msg("success!");
 }

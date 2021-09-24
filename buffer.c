@@ -66,3 +66,28 @@ void buffer_bring_to_front(Buffer* buf, unsigned long index) {
 
   free(tmp);
 }
+
+// todo better
+void buffer_send_to_back(Buffer* buf, unsigned long index) {
+  unsigned int len = buf->length;
+  assert(index < len);
+  size_t elem_size = buf->elem_size;
+  size_t total_bytes = elem_size * len;
+
+  char* tmp = malloc(total_bytes);
+  assert(tmp);
+  memcpy(tmp, buf->data, total_bytes);
+
+  unsigned int ii = 0;
+  for (unsigned int i = 0; i < len; i++) {
+    unsigned int to;
+    if (i == index) {
+      to = len - 1;
+    } else {
+      to = ii++;
+    }
+    memcpy(&buf->data[elem_size * to], &tmp[i * elem_size], elem_size);
+  }
+
+  free(tmp);
+}

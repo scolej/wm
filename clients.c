@@ -51,3 +51,29 @@ void clients_del(Window win) {
 
   assert(clients.length == window_focus_history.length);
 }
+
+// todo - code-gen a typed interface onto the buffer
+Window window_history_get(unsigned int i) {
+  Window *w = buffer_get(&window_focus_history, i);
+  return *w;
+}
+
+void clients_focus_raise(Window win) {
+  for (unsigned int i = 0; i < window_focus_history.length; i++) {
+    Window w = window_history_get(i);
+    if (win == w) {
+      buffer_bring_to_front(&window_focus_history, i);
+      return;
+    }
+  }
+}
+
+void clients_focus_lower(Window win) {
+  for (unsigned int i = 0; i < window_focus_history.length; i++) {
+    Window w = window_history_get(i);
+    if (win == w) {
+      buffer_send_to_back(&window_focus_history, i);
+      return;
+    }
+  }
+}
