@@ -9,6 +9,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 
 // timeout when switching windows for selected client to go to top of stack
@@ -21,15 +22,15 @@
 
 #define BORDER_WIDTH 4
 #define BORDER_GAP 2
-// todo screen gap
+#define SCREEN_GAP 0
 
-/* #define MODMASK Mod4Mask */
-/* #define MODL XK_Super_L */
-/* #define MODR XK_Super_R */
+#define MODMASK Mod4Mask
+#define MODL XK_Super_L
+#define MODR XK_Super_R
 
-#define MODMASK Mod1Mask
-#define MODL XK_Alt_L
-#define MODR XK_Alt_R
+// #define MODMASK Mod1Mask
+// #define MODL XK_Alt_L
+// #define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -93,8 +94,6 @@ unsigned int transient_switching_index = 0;
 
 // flag indicating timer has expired
 char timer_expired = 0;
-
-// char skip_enter = 0;
 
 void manage_new_window(Window win) {
   if (clients_find(win).data) {
@@ -196,11 +195,6 @@ void handle_unmap_notify(XUnmapEvent* event) {
 }
 
 void handle_enter_notify(XCrossingEvent* event) {
-  // if (skip_enter) {
-  //   skip_enter = 0;
-  //   return;
-  // }
-
   Window win = event->window;
   long t = event->time;
   info("changing focus on enter-notify to window %x", win);
@@ -351,19 +345,19 @@ void toggle_maximize(Window win, char kind) {
     case MAX_BOTH:
       new.x = 0;
       new.y = 0;
-      new.w = screen_width - BORDER_WIDTH * 2;
-      new.h = screen_height - BORDER_WIDTH * 2;
+      new.w = screen_width - c->border_width * 2;
+      new.h = screen_height - c->border_width * 2;
       break;
     case MAX_VERT:
       new.x = orig.x;
       new.y = 0;
       new.w = orig.w;
-      new.h = screen_height - BORDER_WIDTH * 2;
+      new.h = screen_height - c->border_width * 2;
       break;
     case MAX_HORI:
       new.x = 0;
       new.y = orig.y;
-      new.w = screen_width - BORDER_WIDTH * 2;
+      new.w = screen_width - c->border_width * 2;
       new.h = orig.h;
       break;
     }
@@ -478,16 +472,22 @@ void toggle_border() {
   Window win = window_history_get(0);
   Client *c = clients_find(win).data;
   if (!c) {
-    fine("toggle_borderd - no client for window %x", win);
+    fine("toggle_border - no client for window %x", win);
     return;
   }
 
+  int delta;
   if (c->border_width) {
     c->border_width = 0;
+    delta = BORDER_WIDTH * 2;
   } else {
     c->border_width = BORDER_WIDTH;
+    delta = BORDER_WIDTH * -2;
   }
   XSetWindowBorderWidth(dsp, win, c->border_width);
+  XResizeWindow(dsp, win,
+                c->current_bounds.w + delta,
+                c->current_bounds.h + delta);
 }
 
 typedef struct {
@@ -545,6 +545,8 @@ void handle_key_release(XKeyEvent *event) {
 // lefts needs to be freed by the caller. The other pointers share this
 // same memory. Returns the number of elements in each list.
 unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** bs) {
+  assert(skip), assert(ls), assert(rs), assert(ts), assert(bs);
+
   unsigned int nc = clients.length - 1;
   // 2 edges per client, 1 edge for the screen
   unsigned int edges = nc * 2 + 1;
@@ -555,7 +557,6 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
   *ts = mem + edges * 2;
   *bs = mem + edges * 3;
 
-  unsigned int gap = BORDER_WIDTH * 2 + BORDER_GAP;
   unsigned int count = 0;
   for (unsigned int ci = 0; ci < clients.length; ci++) {
     Client* c = buffer_get(&clients, ci);
@@ -563,7 +564,11 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
       continue;
     }
 
+    unsigned int b2 = c->border_width * 2;
     Rectangle rect = c->current_bounds;
+    rect.w += b2;
+    rect.h += b2;
+
     int r = rect.x + rect.w - 1;
     int b = rect.y + rect.h - 1;
 
@@ -573,17 +578,17 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
     (*bs)[count] = b;
     count++;
 
-    (*ls)[count] = r + gap;
-    (*rs)[count] = rect.x - gap;
-    (*ts)[count] = b + gap;
-    (*bs)[count] = rect.y - gap;
+    (*ls)[count] = r + BORDER_GAP + 1;
+    (*rs)[count] = rect.x - BORDER_GAP - 1;
+    (*ts)[count] = b + BORDER_GAP + 1;
+    (*bs)[count] = rect.y - BORDER_GAP - 1;
     count++;
   }
 
-  (*ls)[count] = 0;
-  (*rs)[count] = screen_width - BORDER_WIDTH * 2 - 1;
-  (*ts)[count] = 0;
-  (*bs)[count] = screen_height - BORDER_WIDTH * 2 - 1;
+  (*ls)[count] = SCREEN_GAP;
+  (*rs)[count] = screen_width - 1 - SCREEN_GAP;
+  (*ts)[count] = SCREEN_GAP;
+  (*bs)[count] = screen_height - 1 - SCREEN_GAP;
   count++;
 
   assert(count == edges);
@@ -691,19 +696,20 @@ void handle_motion(XMotionEvent* event) {
   int b = snap(rect.y + rect.h - 1, bs, n, SNAP_DIST);
   free(ls);
 
-  XMoveResizeWindow(dsp, win, l, t, r - l + 1, b - t + 1);
+  int b2 = 2 * c->border_width;
+  XMoveResizeWindow(dsp, win,
+                    l, t,
+                    r - l - b2 + 1,
+                    b - t - b2 + 1);
 }
 
 void handle_focus_in(XFocusChangeEvent *event) {
-  Window win = event->window;
-
-  fine("--- focus-in %x ---", win);
-
   if (event->mode == NotifyGrab || event->mode == NotifyUngrab) {
     fine("discard grab focus-in");
     return;
   }
 
+  Window win = event->window;
   last_focused_window = win;
   fine("focus in for window %x", win);
 
@@ -723,8 +729,6 @@ void handle_focus_in(XFocusChangeEvent *event) {
 }
 
 void handle_focus_out(XFocusChangeEvent* event) {
-  fine("--- focus-out ---");
-
   if (event->mode == NotifyGrab || event->mode == NotifyUngrab) {
     fine("discard grab focus-out");
     return;
@@ -737,9 +741,6 @@ void handle_focus_out(XFocusChangeEvent* event) {
 
 void handle_configure(XConfigureEvent* event) {
   Window win = event->window;
-
-  fine("--- configure %x ---", win);
-
   int x = event->x;
   int y = event->y;
   int w = event->width;
@@ -778,6 +779,22 @@ void handle_reparent(XReparentEvent *event) {
   }
 }
 
+void log_event_begin(char *event_name) {
+  static unsigned int fill_len = 80;
+
+  char buffer[fill_len];
+  for (unsigned int i = 0; i < fill_len; i++) {
+    buffer[i] = '-';
+  }
+  buffer[fill_len - 1] = '\0';
+
+  unsigned int len = MIN(strlen(event_name), 70);
+  memcpy(buffer, event_name, len);
+  buffer[len] = ' ';
+
+  fine(buffer);
+}
+
 // grab and dispatch all events in the queue
 void handle_xevents() {
   while (XPending(dsp)) {
@@ -786,45 +803,59 @@ void handle_xevents() {
 
     switch (event.type) {
     case MapRequest:
+      log_event_begin("map request");
       handle_map_request((XMapRequestEvent*)&event.xmaprequest);
       break;
     case MapNotify:
+      log_event_begin("map notify");
       handle_map_notify((XMapEvent*)&event.xmap);
       break;
     case UnmapNotify:
+      log_event_begin("unmap notify");
       handle_unmap_notify((XUnmapEvent*)&event.xunmap);
       break;
     case EnterNotify:
+      log_event_begin("enter notify");
       handle_enter_notify((XCrossingEvent*)&event.xcrossing);
       break;
     case ButtonPress:
+      log_event_begin("button press");
       handle_button_press((XButtonEvent*)&event.xbutton);
       break;
     case ButtonRelease:
+      log_event_begin("button release");
       handle_button_release((XButtonEvent*)&event.xbutton);
       break;
     case KeyPress:
+      log_event_begin("key press");
       handle_key_press((XKeyEvent*)&event.xkey);
       break;
     case KeyRelease:
+      log_event_begin("key release");
       handle_key_release((XKeyEvent*)&event.xkey);
       break;
     case MotionNotify:
+      log_event_begin("motion notify");
       handle_motion((XMotionEvent*)&event.xmotion);
       break;
     case FocusIn:
+      log_event_begin("focus in");
       handle_focus_in((XFocusChangeEvent*)&event.xfocus);
       break;
     case FocusOut:
+      log_event_begin("focus out");
       handle_focus_out((XFocusChangeEvent*)&event.xfocus);
       break;
     case ConfigureNotify:
+      log_event_begin("configure notify");
       handle_configure((XConfigureEvent*)&event.xconfigure);
       break;
     case DestroyNotify:
+      log_event_begin("destroy notify");
       handle_destroy((XDestroyWindowEvent*)&event.xdestroywindow);
       break;
     case ReparentNotify:
+      log_event_begin("reparent notify");
       handle_reparent((XReparentEvent*)&event.xreparent);
       break;
     }
