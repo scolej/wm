@@ -375,14 +375,18 @@ void timer_handler(int signal) {
   timer_expired = 1;
 }
 
-void timer_has_expired() {
-  fine("timer expired");
+// finalize transient switching. make the currently transiently focused
+// window really focused.
+void finalize_window_switching() {
+  if (!transient_switching) {
+    return;
+  }
 
   transient_switching = 0;
 
   Client *c = clients_find(last_focused_window).data;
   if (!c) {
-    info("timer expired with focus on un-tracked window: %x", last_focused_window);
+    info("focus on un-tracked window: %x", last_focused_window);
     return;
   }
 
@@ -418,28 +422,36 @@ void switch_windows() {
   switch_next_window();
 }
 
+// finds the window which should be the target of an operation (eg:
+// maximize). make sure, if we're in the middle of transient-switching, to
+// finish and select immediately.
+Window get_target_window() {
+  finalize_window_switching();
+  return window_history_get(0);
+}
+
 void maximize() {
-  Window win = window_history_get(0);
+  Window win = get_target_window();
   toggle_maximize(win, MAX_BOTH);
 }
 
 void maximize_horiz() {
-  Window win = window_history_get(0);
+  Window win = get_target_window();
   toggle_maximize(win, MAX_HORI);
 }
 
 void maximize_vert() {
-  Window win = window_history_get(0);
+  Window win = get_target_window();
   toggle_maximize(win, MAX_VERT);
 }
 
 void close_window() {
-  Window win = window_history_get(0);
+  Window win = get_target_window();
   XDestroyWindow(dsp, win);
 }
 
 void lower() {
-  Window win0 = window_history_get(0);
+  Window win0 = get_target_window();
   Window win1 = window_history_get(1);
 
   Client *c = clients_find(win1).data;
@@ -469,7 +481,7 @@ void log_debug() {
 }
 
 void toggle_border() {
-  Window win = window_history_get(0);
+  Window win = get_target_window();
   Client *c = clients_find(win).data;
   if (!c) {
     fine("toggle_border - no client for window %x", win);
@@ -963,7 +975,7 @@ int main(int argc, char** argv) {
   for (;;) {
     if (timer_expired) {
       timer_expired = 0;
-      timer_has_expired();
+      finalize_window_switching();
     }
 
     handle_xevents();
