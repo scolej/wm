@@ -23,13 +23,13 @@
 #define BORDER_GAP 2
 // todo screen gap
 
-#define MODMASK Mod4Mask
-#define MODL XK_Super_L
-#define MODR XK_Super_R
+/* #define MODMASK Mod4Mask */
+/* #define MODL XK_Super_L */
+/* #define MODR XK_Super_R */
 
-// #define MODMASK Mod1Mask
-// #define MODL XK_Alt_L
-// #define MODR XK_Alt_R
+#define MODMASK Mod1Mask
+#define MODL XK_Alt_L
+#define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -124,10 +124,11 @@ void manage_new_window(Window win) {
   c.current_bounds.h = attr.height;
 
   c.max_state = MAX_NONE;
+  c.border_width = BORDER_WIDTH;
 
   clients_add(&c);
 
-  XSetWindowBorderWidth(dsp, win, BORDER_WIDTH);
+  XSetWindowBorderWidth(dsp, win, c.border_width);
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
 
@@ -473,6 +474,22 @@ void log_debug() {
   info("------");
 }
 
+void toggle_border() {
+  Window win = window_history_get(0);
+  Client *c = clients_find(win).data;
+  if (!c) {
+    fine("toggle_borderd - no client for window %x", win);
+    return;
+  }
+
+  if (c->border_width) {
+    c->border_width = 0;
+  } else {
+    c->border_width = BORDER_WIDTH;
+  }
+  XSetWindowBorderWidth(dsp, win, c->border_width);
+}
+
 typedef struct {
   KeySym sym;
   unsigned int mods;
@@ -489,6 +506,7 @@ Key keys[] = {
   { XK_H, MODMASK, 0, maximize_horiz},
   { XK_D, MODMASK, 0, log_debug},
   { XK_Q, MODMASK, 0, close_window},
+  { XK_B, MODMASK, 0, toggle_border},
   { XK_Escape, MODMASK, 0, lower },
   { MODL, 0, 0, switch_windows },
   { MODR, 0, 0, switch_windows },

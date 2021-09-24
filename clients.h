@@ -19,6 +19,9 @@ typedef struct {
 
   // maximization state
   char max_state;
+
+  // flag to track border toggle state (via current border width)
+  char border_width;
 } Client;
 
 // Pair of pointer and array index.
