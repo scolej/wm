@@ -230,6 +230,155 @@ struct {
 // if it's not, then we can use it to switch windows.
 char prime_mod = 0;
 
+// snap values. these are the values to which the left/right/top/bottom
+// edges should snap. they are set at drag-start, otherwise null.
+int *snaps_lefts = NULL;
+int *snaps_rights = NULL;
+int *snaps_tops = NULL;
+int *snaps_bottoms = NULL;
+
+// number of values in each snap list.
+unsigned int snap_count;
+
+// Make snap lists for edges: lefts, rights, tops, bottoms. These are the
+// values for each edge which we can snap to. The pointer written into
+// lefts needs to be freed by the caller. The other pointers share this
+// same memory. Returns the number of elements in each list.
+unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** bs) {
+  assert(skip), assert(ls), assert(rs), assert(ts), assert(bs);
+
+  unsigned int nc = clients.length - 1;
+  // 2 edges per client, 1 edge for the screen
+  unsigned int edges = nc * 2 + 1;
+  unsigned int cells = edges * 4;
+  int* mem = malloc(sizeof(int) * cells);
+  *ls = mem;
+  *rs = mem + edges;
+  *ts = mem + edges * 2;
+  *bs = mem + edges * 3;
+
+  unsigned int count = 0;
+  for (unsigned int ci = 0; ci < clients.length; ci++) {
+    Client* c = buffer_get(&clients, ci);
+    if (skip == c) {
+      continue;
+    }
+
+    unsigned int b2 = c->border_width * 2;
+    Rectangle rect = c->current_bounds;
+    rect.w += b2;
+    rect.h += b2;
+
+    int r = rect.x + rect.w - 1;
+    int b = rect.y + rect.h - 1;
+
+    (*ls)[count] = rect.x;
+    (*rs)[count] = r;
+    (*ts)[count] = rect.y;
+    (*bs)[count] = b;
+    count++;
+
+    (*ls)[count] = r + BORDER_GAP + 1;
+    (*rs)[count] = rect.x - BORDER_GAP - 1;
+    (*ts)[count] = b + BORDER_GAP + 1;
+    (*bs)[count] = rect.y - BORDER_GAP - 1;
+    count++;
+  }
+
+  (*ls)[count] = SCREEN_GAP;
+  (*rs)[count] = screen_width - 1 - SCREEN_GAP;
+  (*ts)[count] = SCREEN_GAP;
+  (*bs)[count] = screen_height - 1 - SCREEN_GAP;
+  count++;
+
+  assert(count == edges);
+  return edges;
+}
+
+void drag_start(Window win, int cursor_x, int cursor_y) {
+  Client *c = clients_find(win).data;
+  if (!c) {
+    warn("no client for window: %x", win);
+    return;
+  }
+
+  Rectangle bounds = c->current_bounds;
+
+  int x1, x2, y1, y2;
+  x1 = bounds.x + bounds.w * HANDLE_FRAC;
+  x2 = bounds.x + bounds.w * (1.0 - HANDLE_FRAC);
+  y1 = bounds.y + bounds.h * HANDLE_FRAC;
+  y2 = bounds.y + bounds.h * (1.0 - HANDLE_FRAC);
+
+  enum DragHandle dhx;
+  if (cursor_x < x1) {
+    dhx = LOW;
+  } else if (cursor_x < x2) {
+    dhx = MIDDLE;
+  } else {
+    dhx = HIGH;
+  }
+
+  enum DragHandle dhy;
+  if (cursor_y < y1) {
+    dhy = LOW;
+  } else if (cursor_y < y2) {
+    dhy = MIDDLE;
+  } else {
+    dhy = HIGH;
+  }
+
+  enum DragKind dk;
+  if (dhx == LOW && dhy == MIDDLE) {
+    dk = RESIZE_W;
+  } else if (dhx == HIGH && dhy == MIDDLE) {
+    dk = RESIZE_E;
+  } else if (dhx == MIDDLE && dhy == LOW) {
+    dk = RESIZE_N;
+  } else if (dhx == MIDDLE && dhy == HIGH) {
+    dk = RESIZE_S;
+  } else if (dhx == LOW && dhy == LOW) {
+    dk = RESIZE_NW;
+  } else if (dhx == HIGH && dhy == LOW) {
+    dk = RESIZE_NE;
+  } else if (dhx == LOW && dhy == HIGH) {
+    dk = RESIZE_SW;
+  } else if (dhx == HIGH && dhy == HIGH) {
+    dk = RESIZE_SE;
+  } else {
+    dk = MOVE;
+  }
+
+  drag_state.win = win;
+  drag_state.start_win_x = bounds.x;
+  drag_state.start_win_y = bounds.y;
+  drag_state.start_win_w = bounds.w;
+  drag_state.start_win_h = bounds.h;
+  drag_state.start_mouse_x = cursor_x;
+  drag_state.start_mouse_y = cursor_y;
+  drag_state.kind = dk;
+
+  // any manual resize/move reverts the maximization state
+  // todo this should really happen on move, not press
+  c->max_state = MAX_NONE;
+
+  snap_count =
+    make_snap_lists(c, &snaps_lefts, &snaps_rights,
+                    &snaps_tops, &snaps_bottoms);
+
+  XRaiseWindow(dsp, win);
+}
+
+void drag_end() {
+  drag_state.win = 0;
+  free(snaps_lefts);
+  snaps_lefts = NULL;
+  snaps_rights = NULL;
+  snaps_tops = NULL;
+  snaps_bottoms = NULL;
+  snap_count = 0;
+}
+
 void handle_button_press(XButtonEvent* event) {
   prime_mod = 0;
 
@@ -238,80 +387,14 @@ void handle_button_press(XButtonEvent* event) {
   int y = event->y_root;
 
   if (event->button == 1) {
-    Client *c = clients_find(win).data;
-    if (!c) {
-      warn("no client for window: %x", win);
-      return;
-    }
-
-    Rectangle bounds = c->current_bounds;
-
-    int x1, x2, y1, y2;
-    x1 = bounds.x + bounds.w * HANDLE_FRAC;
-    x2 = bounds.x + bounds.w * (1.0 - HANDLE_FRAC);
-    y1 = bounds.y + bounds.h * HANDLE_FRAC;
-    y2 = bounds.y + bounds.h * (1.0 - HANDLE_FRAC);
-
-    enum DragHandle dhx;
-    if (x < x1) {
-      dhx = LOW;
-    } else if (x < x2) {
-      dhx = MIDDLE;
-    } else {
-      dhx = HIGH;
-    }
-
-    enum DragHandle dhy;
-    if (y < y1) {
-      dhy = LOW;
-    } else if (y < y2) {
-      dhy = MIDDLE;
-    } else {
-      dhy = HIGH;
-    }
-
-    enum DragKind dk;
-    if (dhx == LOW && dhy == MIDDLE) {
-      dk = RESIZE_W;
-    } else if (dhx == HIGH && dhy == MIDDLE) {
-      dk = RESIZE_E;
-    } else if (dhx == MIDDLE && dhy == LOW) {
-      dk = RESIZE_N;
-    } else if (dhx == MIDDLE && dhy == HIGH) {
-      dk = RESIZE_S;
-    } else if (dhx == LOW && dhy == LOW) {
-      dk = RESIZE_NW;
-    } else if (dhx == HIGH && dhy == LOW) {
-      dk = RESIZE_NE;
-    } else if (dhx == LOW && dhy == HIGH) {
-      dk = RESIZE_SW;
-    } else if (dhx == HIGH && dhy == HIGH) {
-      dk = RESIZE_SE;
-    } else {
-      dk = MOVE;
-    }
-
-    drag_state.win = win;
-    drag_state.start_win_x = bounds.x;
-    drag_state.start_win_y = bounds.y;
-    drag_state.start_win_w = bounds.w;
-    drag_state.start_win_h = bounds.h;
-    drag_state.start_mouse_x = x;
-    drag_state.start_mouse_y = y;
-    drag_state.kind = dk;
-
-    // any manual resize/move reverts the maximization state
-    // todo this should really happen on move, not press
-    c->max_state = MAX_NONE;
-
-    XRaiseWindow(dsp, win);
+    drag_start(win, x, y);
   }
 }
 
 void handle_button_release(XButtonEvent* event) {
   if (event->button == 1) {
     if (drag_state.win) {
-      drag_state.win = 0;
+      drag_end();
     }
   } else if (event->button == 3) {
     Window win = event->subwindow;
@@ -552,61 +635,6 @@ void handle_key_release(XKeyEvent *event) {
   }
 }
 
-// Make snap lists for edges: lefts, rights, tops, bottoms. These are the
-// values for each edge which we can snap to. The pointer written into
-// lefts needs to be freed by the caller. The other pointers share this
-// same memory. Returns the number of elements in each list.
-unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** bs) {
-  assert(skip), assert(ls), assert(rs), assert(ts), assert(bs);
-
-  unsigned int nc = clients.length - 1;
-  // 2 edges per client, 1 edge for the screen
-  unsigned int edges = nc * 2 + 1;
-  unsigned int cells = edges * 4;
-  int* mem = malloc(sizeof(int) * cells);
-  *ls = mem;
-  *rs = mem + edges;
-  *ts = mem + edges * 2;
-  *bs = mem + edges * 3;
-
-  unsigned int count = 0;
-  for (unsigned int ci = 0; ci < clients.length; ci++) {
-    Client* c = buffer_get(&clients, ci);
-    if (skip == c) {
-      continue;
-    }
-
-    unsigned int b2 = c->border_width * 2;
-    Rectangle rect = c->current_bounds;
-    rect.w += b2;
-    rect.h += b2;
-
-    int r = rect.x + rect.w - 1;
-    int b = rect.y + rect.h - 1;
-
-    (*ls)[count] = rect.x;
-    (*rs)[count] = r;
-    (*ts)[count] = rect.y;
-    (*bs)[count] = b;
-    count++;
-
-    (*ls)[count] = r + BORDER_GAP + 1;
-    (*rs)[count] = rect.x - BORDER_GAP - 1;
-    (*ts)[count] = b + BORDER_GAP + 1;
-    (*bs)[count] = rect.y - BORDER_GAP - 1;
-    count++;
-  }
-
-  (*ls)[count] = SCREEN_GAP;
-  (*rs)[count] = screen_width - 1 - SCREEN_GAP;
-  (*ts)[count] = SCREEN_GAP;
-  (*bs)[count] = screen_height - 1 - SCREEN_GAP;
-  count++;
-
-  assert(count == edges);
-  return edges;
-}
-
 void handle_motion(XMotionEvent* event) {
   if (drag_state.win == 0) {
     return;
@@ -700,13 +728,14 @@ void handle_motion(XMotionEvent* event) {
     return;
   }
 
-  int *ls, *rs, *ts, *bs;
-  unsigned int n = make_snap_lists(c, &ls, &rs, &ts, &bs);
-  int l = snap(rect.x, ls, n, SNAP_DIST);
-  int r = snap(rect.x + rect.w - 1, rs, n, SNAP_DIST);
-  int t = snap(rect.y, ts, n, SNAP_DIST);
-  int b = snap(rect.y + rect.h - 1, bs, n, SNAP_DIST);
-  free(ls);
+  assert(snaps_lefts);
+  assert(snaps_rights);
+  assert(snaps_tops);
+  assert(snaps_bottoms);
+  int l = snap(rect.x, snaps_lefts, snap_count, SNAP_DIST);
+  int r = snap(rect.x + rect.w - 1, snaps_rights, snap_count, SNAP_DIST);
+  int t = snap(rect.y, snaps_tops, snap_count, SNAP_DIST);
+  int b = snap(rect.y + rect.h - 1, snaps_bottoms, snap_count, SNAP_DIST);
 
   int b2 = 2 * c->border_width;
   XMoveResizeWindow(dsp, win,
@@ -848,6 +877,8 @@ void handle_xevents() {
       break;
     case MotionNotify:
       log_event_begin("motion notify");
+      // read off all available motion events and use most recent only
+      while (XCheckTypedEvent(dsp, MotionNotify, &event));
       handle_motion((XMotionEvent*)&event.xmotion);
       break;
     case FocusIn:
