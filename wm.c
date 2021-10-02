@@ -24,13 +24,13 @@
 #define BORDER_GAP 2
 #define SCREEN_GAP 0
 
-#define MODMASK Mod4Mask
-#define MODL XK_Super_L
-#define MODR XK_Super_R
+/* #define MODMASK Mod4Mask */
+/* #define MODL XK_Super_L */
+/* #define MODR XK_Super_R */
 
-// #define MODMASK Mod1Mask
-// #define MODL XK_Alt_L
-// #define MODR XK_Alt_R
+#define MODMASK Mod1Mask
+#define MODL XK_Alt_L
+#define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -161,16 +161,22 @@ void fetch_apply_normal_hints(Window win) {
   int h = c->current_bounds.h;
 
   if (sh->flags & PMinSize) {
-    info("using minimum size");
+    info("minimum size: %d %d", sh->min_width, sh->max_width);
     w = MAX(sh->min_width, w);
     h = MAX(sh->min_height, h);
   }
 
   if (sh->flags & PBaseSize) {
-    info("using base size");
+    info("base size: %d %d", sh->base_width, sh->base_width);
     w = MAX(sh->base_width, w);
     h = MAX(sh->base_height, h);
   }
+
+  if (sh->flags & PAspect) {
+    info("aspect: %d %d", sh->min_aspect, sh->max_aspect);
+  }
+
+  info("size: %d %d", sh->width, sh->height);
 
   XResizeWindow(dsp, win, w, h);
 
@@ -184,6 +190,10 @@ void handle_map_request(XMapRequestEvent* event) {
   manage_new_window(event->window);
   fetch_apply_normal_hints(win);
   XMapWindow(dsp, win);
+
+  // todo context menus are cooked.
+  // offset from mouse pointer?
+  // enter_notify for override-redirect window??
 }
 
 void handle_map_notify(XMapEvent* event) {
@@ -196,6 +206,12 @@ void handle_unmap_notify(XUnmapEvent* event) {
 
 void handle_enter_notify(XCrossingEvent* event) {
   Window win = event->window;
+
+  if (!clients_find(win).data) {
+    info("skip focus change on enter for untracked window");
+    return;
+  }
+
   long t = event->time;
   info("changing focus on enter-notify to window %x", win);
   XSetInputFocus(dsp, win, RevertToParent, t);
@@ -396,6 +412,7 @@ void handle_button_release(XButtonEvent* event) {
     if (drag_state.win) {
       drag_end();
     }
+    // todo raise , focus, and track focus change
   } else if (event->button == 3) {
     Window win = event->subwindow;
     XLowerWindow(dsp, win);
