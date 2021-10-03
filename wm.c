@@ -96,23 +96,6 @@ unsigned int transient_switching_index = 0;
 // flag indicating timer has expired
 char timer_expired = 0;
 
-void synthesize_configure_notify(Client *c) {
-  XConfigureEvent event;
-  event.type = ConfigureNotify;
-  event.display = dsp;
-  event.event = c->win;
-  event.window = c->win;
-  event.x = c->current_bounds.x;
-  event.y = c->current_bounds.y;
-  event.width = c->current_bounds.w;
-  event.height = c->current_bounds.h;
-  event.border_width = c->border_width; // todo send another on border toggle?
-  event.above = None;
-  event.override_redirect = False;
-  info("sending synthetic configure notify for %x", c->win);
-  assert(XSendEvent(dsp, c->win, False, StructureNotifyMask, (XEvent*)&event));
-}
-
 #define MIN(a, b) ( a < b ? a : b )
 #define MAX(a, b) ( a > b ? a : b )
 
@@ -180,15 +163,13 @@ void manage_new_window(Window win) {
   c.max_state = MAX_NONE;
   c.border_width = BORDER_WIDTH;
 
-  fetch_apply_normal_hints(&c);
+  // fetch_apply_normal_hints(&c);
 
   clients_add(&c);
 
   XSetWindowBorderWidth(dsp, win, c.border_width);
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask | PropertyChangeMask);
-
-  synthesize_configure_notify(&c);
 
   info("added new window: %x with position [%d %d] and size [%d %d]",
        win, attr.x, attr.y, attr.width, attr.height);
@@ -399,11 +380,6 @@ void drag_start(Window win, int cursor_x, int cursor_y) {
 }
 
 void drag_end() {
-  Client *c = clients_find(drag_state.win).data;
-  if (c) {
-    synthesize_configure_notify(c);
-  }
-
   drag_state.win = 0;
   free(snaps_lefts);
   snaps_lefts = NULL;
@@ -822,9 +798,12 @@ void handle_configure(XConfigureEvent* event) {
   int w = event->width;
   int h = event->height;
 
+  info("new position for window %x is [%d %d] [%d %d]",
+       win, x, y, w, h);
+
   Client* c = clients_find(win).data;
   if (!c) {
-    fine("no client for window %x", win);
+    info("no client for window %x", win);
     return;
   }
 
@@ -832,23 +811,34 @@ void handle_configure(XConfigureEvent* event) {
   c->current_bounds.y = y;
   c->current_bounds.w = w;
   c->current_bounds.h = h;
-
-  fine("new position for window %x is [%d %d %d %d]", win, x, y, w, h);
 }
 
 void handle_configure_request(XConfigureRequestEvent* event) {
   Window win = event->window;
-  Client* c = clients_find(win).data;
-  if (!c) {
-    fine("no client for window %x", win);
-    return;
+
+  info("configure request for %x with [%d %d] [%d %d]",
+       win, event->x, event->y, event->width, event->height);
+
+  // Client* c = clients_find(win).data;
+  // if (!c) {
+  //   fine("no client for window %x", win);
+  //   return;
+  // }
+
+  // ahhhh so we get configure notifies first!!
+  // need to create clients a bit more eagerly?
+
+  // todo a & b && a & c
+  // a & (a | b) ??
+  if (event->value_mask & CWX &&
+      event->value_mask & CWY) {
+    XMoveWindow(dsp, win, event->x, event->y);
   }
 
-  info("configure request with [%d %d] [%d %d]",
-       event->x, event->y, event->width, event->height);
-
-  XResizeWindow(dsp, win, event->width, event->height);
-  synthesize_configure_notify(c);
+  if (event->value_mask & CWWidth &&
+      event->value_mask & CWHeight) {
+    XResizeWindow(dsp, win, event->width, event->height);
+  }
 }
 
 void handle_property(XPropertyEvent* event) {
@@ -858,7 +848,7 @@ void handle_property(XPropertyEvent* event) {
     info("new hints for window: %x", win);
     Client *c = clients_find(win).data;
     if (c) {
-      fetch_apply_normal_hints(c);
+      // todo fetch_apply_normal_hints(c);
     }
   }
 }
