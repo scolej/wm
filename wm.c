@@ -1,6 +1,7 @@
 #include "buffer.h"
 #include "clients.h"
 #include "snap.h"
+#include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <assert.h>
@@ -13,7 +14,7 @@
 #include <sys/time.h>
 
 // timeout when switching windows for selected client to go to top of stack
-#define SWITCH_TIMEOUT_MS 1000
+#define SWITCH_TIMEOUT_MS 600
 
 #define SNAP_DIST 30
 
@@ -24,13 +25,13 @@
 #define BORDER_GAP 2
 #define SCREEN_GAP 0
 
-/* #define MODMASK Mod4Mask */
-/* #define MODL XK_Super_L */
-/* #define MODR XK_Super_R */
+#define MODMASK Mod4Mask
+#define MODL XK_Super_L
+#define MODR XK_Super_R
 
-#define MODMASK Mod1Mask
-#define MODL XK_Alt_L
-#define MODR XK_Alt_R
+// #define MODMASK Mod1Mask
+// #define MODL XK_Alt_L
+// #define MODR XK_Alt_R
 
 void fatal(char* msg, ...) {
   va_list args;
@@ -95,65 +96,32 @@ unsigned int transient_switching_index = 0;
 // flag indicating timer has expired
 char timer_expired = 0;
 
-void manage_new_window(Window win) {
-  if (clients_find(win).data) {
-    warn("already tracking %x", win);
-    return;
-  }
-
-  Client c;
-  c.win = win;
-
-  Status st;
-  XWindowAttributes attr;
-  st = XGetWindowAttributes(dsp, win, &attr);
-  if (!st) {
-    warn("failed to get initial window attributes for %x", win);
-    return;
-  }
-
-  if (attr.override_redirect) {
-    info("ignoring override_redirect window");
-    return;
-  }
-
-  c.current_bounds.x = attr.x;
-  c.current_bounds.y = attr.y;
-  c.current_bounds.w = attr.width;
-  c.current_bounds.h = attr.height;
-
-  c.max_state = MAX_NONE;
-  c.border_width = BORDER_WIDTH;
-
-  clients_add(&c);
-
-  XSetWindowBorderWidth(dsp, win, c.border_width);
-  XSetWindowBorder(dsp, win, unfocused_colour.pixel);
-  XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask);
-
-  info("added new window: %x", win);
-}
-
-void remove_window(Window win) {
-  clients_del(win);
-  info("destroyed window %x", win);
+void synthesize_configure_notify(Client *c) {
+  XConfigureEvent event;
+  event.type = ConfigureNotify;
+  event.display = dsp;
+  event.event = c->win;
+  event.window = c->win;
+  event.x = c->current_bounds.x;
+  event.y = c->current_bounds.y;
+  event.width = c->current_bounds.w;
+  event.height = c->current_bounds.h;
+  event.border_width = c->border_width; // todo send another on border toggle?
+  event.above = None;
+  event.override_redirect = False;
+  info("sending synthetic configure notify for %x", c->win);
+  assert(XSendEvent(dsp, c->win, False, StructureNotifyMask, (XEvent*)&event));
 }
 
 #define MIN(a, b) ( a < b ? a : b )
 #define MAX(a, b) ( a > b ? a : b )
 
-void fetch_apply_normal_hints(Window win) {
+void fetch_apply_normal_hints(Client *c) {
   XSizeHints *sh = XAllocSizeHints();
   assert(sh);
   long supplied;
-  Status st = XGetWMNormalHints(dsp, win, sh, &supplied);
+  Status st = XGetWMNormalHints(dsp, c->win, sh, &supplied);
   if (!st) {
-    goto clean;
-  }
-
-  Client *c = clients_find(win).data;
-  if (!c) {
-    warn("no client for window while applying size hints: %x", win);
     goto clean;
   }
 
@@ -178,22 +146,67 @@ void fetch_apply_normal_hints(Window win) {
 
   info("size: %d %d", sh->width, sh->height);
 
-  XResizeWindow(dsp, win, w, h);
+  XResizeWindow(dsp, c->win, w, h);
 
  clean:
   XFree(sh);
+}
+
+void manage_new_window(Window win) {
+  if (clients_find(win).data) {
+    warn("already tracking %x", win);
+    return;
+  }
+
+  Status st;
+  XWindowAttributes attr;
+  st = XGetWindowAttributes(dsp, win, &attr);
+  if (!st) {
+    warn("failed to get initial window attributes for %x", win);
+    return;
+  }
+
+  if (attr.override_redirect) {
+    info("ignoring override_redirect window");
+    return;
+  }
+
+  Client c;
+  c.win = win;
+  c.current_bounds.x = attr.x;
+  c.current_bounds.y = attr.y;
+  c.current_bounds.w = attr.width;
+  c.current_bounds.h = attr.height;
+  c.max_state = MAX_NONE;
+  c.border_width = BORDER_WIDTH;
+
+  fetch_apply_normal_hints(&c);
+
+  clients_add(&c);
+
+  XSetWindowBorderWidth(dsp, win, c.border_width);
+  XSetWindowBorder(dsp, win, unfocused_colour.pixel);
+  XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask | PropertyChangeMask);
+
+  synthesize_configure_notify(&c);
+
+  info("added new window: %x with position [%d %d] and size [%d %d]",
+       win, attr.x, attr.y, attr.width, attr.height);
+}
+
+void remove_window(Window win) {
+  clients_del(win);
+  info("destroyed window %x", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
   fine("map request for window: %x", win);
   manage_new_window(event->window);
-  fetch_apply_normal_hints(win);
   XMapWindow(dsp, win);
 
   // todo context menus are cooked.
   // offset from mouse pointer?
-  // enter_notify for override-redirect window??
 }
 
 void handle_map_notify(XMapEvent* event) {
@@ -386,6 +399,11 @@ void drag_start(Window win, int cursor_x, int cursor_y) {
 }
 
 void drag_end() {
+  Client *c = clients_find(drag_state.win).data;
+  if (c) {
+    synthesize_configure_notify(c);
+  }
+
   drag_state.win = 0;
   free(snaps_lefts);
   snaps_lefts = NULL;
@@ -412,7 +430,7 @@ void handle_button_release(XButtonEvent* event) {
     if (drag_state.win) {
       drag_end();
     }
-    // todo raise , focus, and track focus change
+    // todo raise, focus, and track focus change
   } else if (event->button == 3) {
     Window win = event->subwindow;
     XLowerWindow(dsp, win);
@@ -513,8 +531,8 @@ void switch_windows() {
 
   // reset the timer
   struct itimerval t;
-  t.it_value.tv_sec = 1;
-  t.it_value.tv_usec = 0;
+  t.it_value.tv_sec = 0;
+  t.it_value.tv_usec = SWITCH_TIMEOUT_MS * 1000;
   t.it_interval.tv_sec = 0;
   t.it_interval.tv_usec = 0;
   setitimer(ITIMER_REAL, &t, NULL);
@@ -818,6 +836,33 @@ void handle_configure(XConfigureEvent* event) {
   fine("new position for window %x is [%d %d %d %d]", win, x, y, w, h);
 }
 
+void handle_configure_request(XConfigureRequestEvent* event) {
+  Window win = event->window;
+  Client* c = clients_find(win).data;
+  if (!c) {
+    fine("no client for window %x", win);
+    return;
+  }
+
+  info("configure request with [%d %d] [%d %d]",
+       event->x, event->y, event->width, event->height);
+
+  XResizeWindow(dsp, win, event->width, event->height);
+  synthesize_configure_notify(c);
+}
+
+void handle_property(XPropertyEvent* event) {
+  Atom atom = event->atom;
+  Window win = event->window;
+  if (atom == XA_WM_NORMAL_HINTS && event->state == PropertyNewValue) {
+    info("new hints for window: %x", win);
+    Client *c = clients_find(win).data;
+    if (c) {
+      fetch_apply_normal_hints(c);
+    }
+  }
+}
+
 void handle_destroy(XDestroyWindowEvent* event) {
   remove_window(event->window);
 }
@@ -910,6 +955,10 @@ void handle_xevents() {
       log_event_begin("configure notify");
       handle_configure((XConfigureEvent*)&event.xconfigure);
       break;
+    case ConfigureRequest:
+      log_event_begin("configure request");
+      handle_configure_request((XConfigureRequestEvent*)&event.xconfigurerequest);
+      break;
     case DestroyNotify:
       log_event_begin("destroy notify");
       handle_destroy((XDestroyWindowEvent*)&event.xdestroywindow);
@@ -917,6 +966,10 @@ void handle_xevents() {
     case ReparentNotify:
       log_event_begin("reparent notify");
       handle_reparent((XReparentEvent*)&event.xreparent);
+      break;
+    case PropertyNotify:
+      log_event_begin("property notify");
+      handle_property((XPropertyEvent*)&event.xproperty);
       break;
     }
   }
@@ -980,6 +1033,16 @@ int main(int argc, char** argv) {
     fatal("could not allocate colour");
   }
   switching_colour = col;
+
+  // info("attempting to set work area");
+  // unsigned long bounds[4];
+  // bounds[0] = 0;
+  // bounds[1] = 0;
+  // bounds[2] = screen_width;
+  // bounds[3] = screen_height;
+  // Atom p = XInternAtom(dsp, "_NET_WORKAREA", False);
+  // Atom t = XInternAtom(dsp, "CARDINAL", False);
+  // XChangeProperty(dsp, root, p, t, 32, PropModeReplace, (unsigned char*)(&bounds), 4);
 
   buffer_init(&clients, 500, sizeof(Client));
   buffer_init(&window_focus_history, 500, sizeof(Window));
