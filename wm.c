@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 // timeout when switching windows for selected client to go to top of stack
 #define SWITCH_TIMEOUT_MS 600
@@ -33,45 +34,37 @@
 // #define MODL XK_Alt_L
 // #define MODR XK_Alt_R
 
-void fatal(char* msg, ...) {
-  va_list args;
-  va_start(args, msg);
-  vprintf(msg, args);
-  va_end(args);
-  printf("\n");
-  fflush(stdout);
-  exit(1);
-}
+#define LEVEL_WARN 2
+#define LEVEL_INFO 1
+#define LEVEL_FINE 0
 
-void info(char* msg, ...) {
-  va_list args;
-  va_start(args, msg);
-  vprintf(msg, args);
-  va_end(args);
-  printf("\n");
-  fflush(stdout);
-}
+#define LOG_LEVEL LEVEL_FINE
 
-// todo
-void warn(char* msg, ...) {
+void log_msg(char level, char* msg, ...) {
+  if (level < LOG_LEVEL) return;
+
+  struct timespec ts;
+  struct tm *gmt;
+  clock_gettime(CLOCK_REALTIME, &ts);
+  gmt = gmtime(&ts.tv_sec);
+  char buffer[128];
+  strftime(buffer, sizeof(buffer), "%F %T", gmt);
+
+  printf("%s.%03d ", buffer, (int)(ts.tv_nsec / 1e6));
+
   va_list args;
-  printf("WARN - ");
   va_start(args, msg);
   vprintf(msg, args);
   va_end(args);
+
   printf("\n");
   fflush(stdout);
 }
 
-// todo
-void fine(char* msg, ...) {
-  va_list args;
-  va_start(args, msg);
-  vprintf(msg, args);
-  va_end(args);
-  printf("\n");
-  fflush(stdout);
-}
+#define FATAL(...) { log_msg(LEVEL_WARN, __VA_ARGS__); exit(1); }
+#define WARN(...) log_msg(LEVEL_WARN, __VA_ARGS__);
+#define INFO(...) log_msg(LEVEL_INFO, __VA_ARGS__);
+#define FINE(...) log_msg(LEVEL_FINE, __VA_ARGS__);
 
 #define MAX_NONE 0
 #define MAX_BOTH 1
@@ -99,45 +92,9 @@ char timer_expired = 0;
 #define MIN(a, b) ( a < b ? a : b )
 #define MAX(a, b) ( a > b ? a : b )
 
-void fetch_apply_normal_hints(Client *c) {
-  XSizeHints *sh = XAllocSizeHints();
-  assert(sh);
-  long supplied;
-  Status st = XGetWMNormalHints(dsp, c->win, sh, &supplied);
-  if (!st) {
-    goto clean;
-  }
-
-  int w = c->current_bounds.w;
-  int h = c->current_bounds.h;
-
-  if (sh->flags & PMinSize) {
-    info("minimum size: %d %d", sh->min_width, sh->max_width);
-    w = MAX(sh->min_width, w);
-    h = MAX(sh->min_height, h);
-  }
-
-  if (sh->flags & PBaseSize) {
-    info("base size: %d %d", sh->base_width, sh->base_width);
-    w = MAX(sh->base_width, w);
-    h = MAX(sh->base_height, h);
-  }
-
-  if (sh->flags & PAspect) {
-    info("aspect: %d %d", sh->min_aspect, sh->max_aspect);
-  }
-
-  info("size: %d %d", sh->width, sh->height);
-
-  XResizeWindow(dsp, c->win, w, h);
-
- clean:
-  XFree(sh);
-}
-
 void manage_new_window(Window win) {
   if (clients_find(win).data) {
-    warn("already tracking %x", win);
+    WARN("already tracking %x", win);
     return;
   }
 
@@ -145,12 +102,12 @@ void manage_new_window(Window win) {
   XWindowAttributes attr;
   st = XGetWindowAttributes(dsp, win, &attr);
   if (!st) {
-    warn("failed to get initial window attributes for %x", win);
+    WARN("failed to get initial window attributes for %x", win);
     return;
   }
 
   if (attr.override_redirect) {
-    info("ignoring override_redirect window");
+    INFO("ignoring override_redirect window");
     return;
   }
 
@@ -163,26 +120,24 @@ void manage_new_window(Window win) {
   c.max_state = MAX_NONE;
   c.border_width = BORDER_WIDTH;
 
-  // fetch_apply_normal_hints(&c);
-
   clients_add(&c);
 
   XSetWindowBorderWidth(dsp, win, c.border_width);
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
   XSelectInput(dsp, win, EnterWindowMask | FocusChangeMask | PropertyChangeMask);
 
-  info("added new window: %x with position [%d %d] and size [%d %d]",
+  INFO("added new window: %x with position [%d %d] and size [%d %d]",
        win, attr.x, attr.y, attr.width, attr.height);
 }
 
 void remove_window(Window win) {
   clients_del(win);
-  info("destroyed window %x", win);
+  INFO("destroyed window %x", win);
 }
 
 void handle_map_request(XMapRequestEvent* event) {
   Window win = event->window;
-  fine("map request for window: %x", win);
+  FINE("map request for window: %x", win);
   manage_new_window(event->window);
   XMapWindow(dsp, win);
 
@@ -202,12 +157,12 @@ void handle_enter_notify(XCrossingEvent* event) {
   Window win = event->window;
 
   if (!clients_find(win).data) {
-    info("skip focus change on enter for untracked window");
+    INFO("skip focus change on enter for untracked window");
     return;
   }
 
   long t = event->time;
-  info("changing focus on enter-notify to window %x", win);
+  INFO("changing focus on enter-notify to window %x", win);
   XSetInputFocus(dsp, win, RevertToParent, t);
 }
 
@@ -308,7 +263,7 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
 void drag_start(Window win, int cursor_x, int cursor_y) {
   Client *c = clients_find(win).data;
   if (!c) {
-    warn("no client for window: %x", win);
+    WARN("no client for window: %x", win);
     return;
   }
 
@@ -414,11 +369,11 @@ void handle_button_release(XButtonEvent* event) {
 }
 
 void toggle_maximize(Window win, char kind) {
-  fine("toggle maximize for %x", win);
+  FINE("toggle maximize for %x", win);
 
   Client *c = clients_find(win).data;
   if (!c) {
-    warn("no client for window: %x", win);
+    WARN("no client for window: %x", win);
     return;
   }
 
@@ -480,7 +435,7 @@ void finalize_window_switching() {
 
   Client *c = clients_find(last_focused_window).data;
   if (!c) {
-    info("focus on un-tracked window: %x", last_focused_window);
+    INFO("focus on un-tracked window: %x", last_focused_window);
     return;
   }
 
@@ -494,7 +449,7 @@ void switch_next_window() {
 
   Window win = window_history_get(transient_switching_index);
 
-  fine("setting focus to %x", win);
+  FINE("setting focus to %x", win);
   XRaiseWindow(dsp, win);
   XSetInputFocus(dsp, win, RevertToParent, CurrentTime);
 }
@@ -550,7 +505,7 @@ void lower() {
 
   Client *c = clients_find(win1).data;
   if (!c) {
-    fine("lower - no client for window %x", win1);
+    FINE("lower - no client for window %x", win1);
     return;
   }
 
@@ -562,23 +517,23 @@ void lower() {
                c->current_bounds.h / 2);
   XSetInputFocus(dsp, win1, RevertToParent, CurrentTime);
 
-  info("%x goes to back, focus %x", win0, win1);
+  INFO("%x goes to back, focus %x", win0, win1);
 }
 
 void log_debug() {
-  info("--- debug ---");
+  INFO("--- debug ---");
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
-    info("%15x", c->win);
+    INFO("%15x", c->win);
   }
-  info("------");
+  INFO("------");
 }
 
 void toggle_border() {
   Window win = get_target_window();
   Client *c = clients_find(win).data;
   if (!c) {
-    fine("toggle_border - no client for window %x", win);
+    FINE("toggle_border - no client for window %x", win);
     return;
   }
 
@@ -640,7 +595,7 @@ void handle_key_release(XKeyEvent *event) {
   for (unsigned int i = 0; i < sizeof(keys) / sizeof(Key); i++) {
     Key k = keys[i];
     if (k.kc == ekc) {
-      info("running binding for key index %d", i);
+      INFO("running binding for key index %d", i);
       (k.binding)();
     }
   }
@@ -735,7 +690,7 @@ void handle_motion(XMotionEvent* event) {
   Window win = drag_state.win;
   Client *c = clients_find(win).data;
   if (!c) {
-    info("no client for dragging: %x", win);
+    INFO("no client for dragging: %x", win);
     return;
   }
 
@@ -757,13 +712,13 @@ void handle_motion(XMotionEvent* event) {
 
 void handle_focus_in(XFocusChangeEvent *event) {
   if (event->mode == NotifyGrab || event->mode == NotifyUngrab) {
-    fine("discard grab focus-in");
+    FINE("discard grab focus-in");
     return;
   }
 
   Window win = event->window;
   last_focused_window = win;
-  fine("focus in for window %x", win);
+  FINE("focus in for window %x", win);
 
   if (transient_switching) {
     // focus change is temporary
@@ -773,7 +728,7 @@ void handle_focus_in(XFocusChangeEvent *event) {
 
   Client *c = clients_find(win).data;
   if (!c) {
-    fine("focus-in for un-tracked window: %x", win);
+    FINE("focus-in for un-tracked window: %x", win);
     return;
   }
 
@@ -782,13 +737,13 @@ void handle_focus_in(XFocusChangeEvent *event) {
 
 void handle_focus_out(XFocusChangeEvent* event) {
   if (event->mode == NotifyGrab || event->mode == NotifyUngrab) {
-    fine("discard grab focus-out");
+    FINE("discard grab focus-out");
     return;
   }
 
   Window win = event->window;
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
-  fine("focus out for window %x", win);
+  FINE("focus out for window %x", win);
 }
 
 void handle_configure(XConfigureEvent* event) {
@@ -798,12 +753,12 @@ void handle_configure(XConfigureEvent* event) {
   int w = event->width;
   int h = event->height;
 
-  info("new position for window %x is [%d %d] [%d %d]",
+  INFO("new position for window %x is [%d %d] [%d %d]",
        win, x, y, w, h);
 
   Client* c = clients_find(win).data;
   if (!c) {
-    info("no client for window %x", win);
+    INFO("no client for window %x", win);
     return;
   }
 
@@ -816,12 +771,12 @@ void handle_configure(XConfigureEvent* event) {
 void handle_configure_request(XConfigureRequestEvent* event) {
   Window win = event->window;
 
-  info("configure request for %x with [%d %d] [%d %d]",
+  INFO("configure request for %x with [%d %d] [%d %d]",
        win, event->x, event->y, event->width, event->height);
 
   // Client* c = clients_find(win).data;
   // if (!c) {
-  //   fine("no client for window %x", win);
+  //   FINE("no client for window %x", win);
   //   return;
   // }
 
@@ -841,18 +796,6 @@ void handle_configure_request(XConfigureRequestEvent* event) {
   }
 }
 
-void handle_property(XPropertyEvent* event) {
-  Atom atom = event->atom;
-  Window win = event->window;
-  if (atom == XA_WM_NORMAL_HINTS && event->state == PropertyNewValue) {
-    info("new hints for window: %x", win);
-    Client *c = clients_find(win).data;
-    if (c) {
-      // todo fetch_apply_normal_hints(c);
-    }
-  }
-}
-
 void handle_destroy(XDestroyWindowEvent* event) {
   remove_window(event->window);
 }
@@ -860,14 +803,14 @@ void handle_destroy(XDestroyWindowEvent* event) {
 int error_handler(Display *dsp, XErrorEvent *event) {
   char buffer[128];
   XGetErrorText(dsp, event->error_code, buffer, 128);
-  warn("XError %d %d %s", event->request_code, event->minor_code, buffer);
+  WARN("XError %d %d %s", event->request_code, event->minor_code, buffer);
   return 0;
 }
 
 void handle_reparent(XReparentEvent *event) {
   Window win = event->window;
   if (event->parent != root) {
-    info("removing client after reparent for window: %x", win);
+    INFO("removing client after reparent for window: %x", win);
     remove_window(win);
   }
 }
@@ -885,7 +828,7 @@ void log_event_begin(char *event_name) {
   memcpy(buffer, event_name, len);
   buffer[len] = ' ';
 
-  fine(buffer);
+  FINE(buffer);
 }
 
 // grab and dispatch all events in the queue
@@ -957,10 +900,6 @@ void handle_xevents() {
       log_event_begin("reparent notify");
       handle_reparent((XReparentEvent*)&event.xreparent);
       break;
-    case PropertyNotify:
-      log_event_begin("property notify");
-      handle_property((XPropertyEvent*)&event.xproperty);
-      break;
     }
   }
 }
@@ -974,21 +913,21 @@ int main(int argc, char** argv) {
 
   dsp = XOpenDisplay(NULL);
   if (!dsp) {
-    fatal("could not open display");
+    FATAL("could not open display");
   }
 
   XSetErrorHandler(error_handler);
 
   root = XDefaultRootWindow(dsp);
   if (!root) {
-    fatal("could not open display");
+    FATAL("could not open display");
   }
 
   int default_screen = DefaultScreen(dsp);
 
   Colormap cm = XDefaultColormap(dsp, default_screen);
   if (!cm) {
-    fatal("could not get colour-map");
+    FATAL("could not get colour-map");
   }
 
   screen_width = DisplayWidth(dsp, default_screen);
@@ -1002,7 +941,7 @@ int main(int argc, char** argv) {
   col.blue = 40000;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
-    fatal("could not allocate colour");
+    FATAL("could not allocate colour");
   }
   focused_colour = col;
 
@@ -1011,7 +950,7 @@ int main(int argc, char** argv) {
   col.blue = 30000;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
-    fatal("could not allocate colour");
+    FATAL("could not allocate colour");
   }
   unfocused_colour = col;
 
@@ -1020,11 +959,11 @@ int main(int argc, char** argv) {
   col.blue = 60000;
   st = XAllocColor(dsp, cm, &col);
   if (!st) {
-    fatal("could not allocate colour");
+    FATAL("could not allocate colour");
   }
   switching_colour = col;
 
-  // info("attempting to set work area");
+  // INFO("attempting to set work area");
   // unsigned long bounds[4];
   // bounds[0] = 0;
   // bounds[1] = 0;
@@ -1042,7 +981,7 @@ int main(int argc, char** argv) {
   unsigned int count;
   st = XQueryTree(dsp, root, &retroot, &retparent, &children, &count);
   if (!st) {
-    fatal("couldn't query initial window list");
+    FATAL("couldn't query initial window list");
   }
   for (unsigned int i = 0; i < count; i++) {
     manage_new_window(children[i]);
@@ -1072,7 +1011,6 @@ int main(int argc, char** argv) {
 
   int xfd = ConnectionNumber(dsp);
 
-  unsigned int ticker = 0;
   for (;;) {
     if (timer_expired) {
       timer_expired = 0;
@@ -1090,8 +1028,5 @@ int main(int argc, char** argv) {
     fds[0].fd = xfd;
     fds[0].events = POLLIN;
     poll(fds, 1, 100);
-
-    // draw dots for some breathing room in the log
-    if (++ticker % 100 == 0) info(".");
   }
 }
