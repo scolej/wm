@@ -39,6 +39,9 @@ void clients_del(Window win) {
     return;
   }
 
+  Client *c = p.data;
+  XFree(c->name);
+
   buffer_remove(&clients, p.index);
 
   for (unsigned int i = 0; i < window_focus_history.length; i++) {

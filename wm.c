@@ -111,6 +111,12 @@ void manage_new_window(Window win) {
     return;
   }
 
+  char *name;
+  if (!XFetchName(dsp, win, &name)) {
+    name = NULL;
+    INFO("no name for %x", win);
+  }
+
   Client c;
   c.win = win;
   c.current_bounds.x = attr.x;
@@ -119,7 +125,7 @@ void manage_new_window(Window win) {
   c.current_bounds.h = attr.height;
   c.max_state = MAX_NONE;
   c.border_width = BORDER_WIDTH;
-
+  c.name = name;
   clients_add(&c);
 
   XSetWindowBorderWidth(dsp, win, c.border_width);
@@ -516,7 +522,7 @@ void lower() {
 void log_debug() {
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
-    INFO("%15x", c->win);
+    INFO("%8x %s", c->win, c->name);
   }
 }
 
@@ -822,6 +828,26 @@ void log_event_begin(char *event_name) {
   FINE(buffer);
 }
 
+void handle_new_name(Window win) {
+  Client *c = clients_find(win).data;
+  if (!c) {
+    INFO("no client for %x", win);
+  }
+  XFree(c->name);
+  if (!XFetchName(dsp, win, &c->name)) {
+    c->name = NULL;
+    INFO("no name for %x", win);
+  }
+}
+
+void handle_property(XPropertyEvent* event) {
+  Atom atom = event->atom;
+  Window win = event->window;
+  if (atom == XA_WM_NAME && event->state == PropertyNewValue) {
+    handle_new_name(win);
+  }
+}
+
 // grab and dispatch all events in the queue
 void handle_xevents() {
   while (XPending(dsp)) {
@@ -886,6 +912,10 @@ void handle_xevents() {
     case ReparentNotify:
       log_event_begin("reparent notify");
       handle_reparent((XReparentEvent*)&event.xreparent);
+      break;
+    case PropertyNotify:
+      log_event_begin("property notify");
+      handle_property((XPropertyEvent*)&event.xproperty);
       break;
     }
   }

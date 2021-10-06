@@ -22,6 +22,8 @@ typedef struct {
 
   // flag to track border toggle state (via current border width)
   char border_width;
+
+  char* name;
 } Client;
 
 // Pair of pointer and array index.
