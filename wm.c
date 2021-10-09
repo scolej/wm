@@ -113,7 +113,7 @@ void manage_new_window(Window win) {
 
   char *name;
   if (XFetchName(dsp, win, &name) && name) {
-    INFO("initial name for %x is %s", win, name);
+    INFO("initial name for %x is [%s]", win, name);
   } else {
     name = NULL;
     INFO("no initial name for %x", win);

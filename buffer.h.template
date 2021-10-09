@@ -1,36 +1,36 @@
 #ifndef {{headerdef}}
 #define {{headerdef}}
 
-#include {{typeheader}}
+{{extraheader}}
 #include <stdlib.h>
 
 // A buffer of fixed size elements.
 
-struct {{typename}} {
+struct {{structname}} {
   {{type}}* data;
   unsigned long capacity;
   unsigned long length;
 };
 
 // allocate a new buffer with initial capaity
-void {{prefix}}_init(struct {{typename}} *buf, unsigned long capacity);
+void {{prefix}}_init(struct {{structname}} *buf, unsigned long capacity);
 
 // free the storage backing the buffer
-void {{prefix}}_free(struct {{typename}} *buf);
+void {{prefix}}_free(struct {{structname}} *buf);
 
 // gets a pointer to the element at a given index
-{{type}}* {{prefix}}_get(struct {{typename}} *buf, unsigned long index);
+{{type}}* {{prefix}}_get(struct {{structname}} *buf, unsigned long index);
 
 // add a new element at the end
-void {{prefix}}_add(struct {{typename}} *buf, {{type}}* data);
+void {{prefix}}_add(struct {{structname}} *buf, {{type}}* data);
 
 // remove the element at given index, and fill its place with the last element
-void {{prefix}}_remove(struct {{typename}} *buf, unsigned long index);
+void {{prefix}}_remove(struct {{structname}} *buf, unsigned long index);
 
 // bring the element at given index to the front and push everything else back
-void {{prefix}}_bring_to_front(struct {{typename}} *buf, unsigned long index);
+void {{prefix}}_bring_to_front(struct {{structname}} *buf, unsigned long index);
 
 // send the element at given index to the back and push everything else forward
-void {{prefix}}_send_to_back(struct {{typename}} *buf, unsigned long index);
+void {{prefix}}_send_to_back(struct {{structname}} *buf, unsigned long index);
 
 #endif

@@ -1,3 +1,11 @@
 *.o
+
+# executables
 wm
 test
+test_snap
+test_buffer
+
+# generated files
+clientbuffer.*
+windowbuffer.*

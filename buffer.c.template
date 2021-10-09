@@ -2,30 +2,30 @@
 #include <assert.h>
 #include <string.h>
 
-void {{prefix}}_init(struct {{typename}} *buf, unsigned long capacity) {
+void {{prefix}}_init(struct {{structname}} *buf, unsigned long capacity) {
   buf->length = 0;
   buf->capacity = capacity;
   buf->data = calloc(sizeof({{type}}), capacity);
 }
 
-void {{prefix}}_free(struct {{typename}} *buf) {
+void {{prefix}}_free(struct {{structname}} *buf) {
   free(buf->data);
   buf->data = NULL;
   buf->capacity = 0;
   buf->length = 0;
 }
 
-{{type}}* {{prefix}}_get(struct {{typename}} *buf, unsigned long index) {
+{{type}}* {{prefix}}_get(struct {{structname}} *buf, unsigned long index) {
   assert(index < buf->length);
   return &buf->data[index];
 }
 
-void {{prefix}}_add(struct {{typename}} *buf, {{type}}* data) {
+void {{prefix}}_add(struct {{structname}} *buf, {{type}}* data) {
   assert(buf->length < buf->capacity); // fixme growable
   memcpy(&buf->data[buf->length++], data, sizeof({{type}}));
 }
 
-void {{prefix}}_remove(struct {{typename}} *buf, unsigned long index) {
+void {{prefix}}_remove(struct {{structname}} *buf, unsigned long index) {
   assert(index < buf->length);
   unsigned long last = buf->length - 1;
   if (index != last) {
@@ -36,7 +36,7 @@ void {{prefix}}_remove(struct {{typename}} *buf, unsigned long index) {
 
 // todo this can go faster for sure!
 // probably only need 3 memcpys int total
-void {{prefix}}_bring_to_front(struct {{typename}} *buf, unsigned long index) {
+void {{prefix}}_bring_to_front(struct {{structname}} *buf, unsigned long index) {
   unsigned int len = buf->length;
   assert(index < len);
   size_t elem_size = sizeof({{type}});
@@ -61,7 +61,7 @@ void {{prefix}}_bring_to_front(struct {{typename}} *buf, unsigned long index) {
 }
 
 // todo better
-void {{prefix}}_send_to_back(struct {{typename}} *buf, unsigned long index) {
+void {{prefix}}_send_to_back(struct {{structname}} *buf, unsigned long index) {
   unsigned int len = buf->length;
   assert(index < len);
   size_t elem_size = sizeof({{type}});

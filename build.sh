@@ -2,7 +2,7 @@
 
 sh expand.sh
 
-flags='-Wall -Werror -g -std=gnu99 -fno-strict-aliasing'
+flags='-Wall -Werror -g -std=gnu99'
 
 gcc $flags \
     -lX11 \
