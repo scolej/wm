@@ -112,9 +112,11 @@ void manage_new_window(Window win) {
   }
 
   char *name;
-  if (!XFetchName(dsp, win, &name)) {
+  if (XFetchName(dsp, win, &name) && name) {
+    INFO("initial name for %x is %s", win, name);
+  } else {
     name = NULL;
-    INFO("no name for %x", win);
+    INFO("no initial name for %x", win);
   }
 
   Client c;
@@ -520,6 +522,7 @@ void lower() {
 }
 
 void log_debug() {
+  INFO("%d clients", clients.length);
   for (unsigned int i = 0; i < clients.length; i++) {
     Client *c = buffer_get(&clients, i);
     INFO("%8x %s", c->win, c->name);
@@ -548,6 +551,21 @@ void toggle_border() {
                 c->current_bounds.h + delta);
 }
 
+Window switcher_window = None;
+void make_switcher() {
+  switcher_window = XCreateSimpleWindow(dsp, root, 0, 0, 600, 200, 0, 0, 0);
+  if (!switcher_window) {
+    WARN("failed to make window");
+    return;
+  }
+
+  XSetWindowAttributes attr;
+  attr.event_mask = ExposureMask;
+  XChangeWindowAttributes(dsp, switcher_window, CWEventMask, &attr);
+
+  XMapWindow(dsp, switcher_window);
+}
+
 typedef struct {
   KeySym sym;
   unsigned int mods;
@@ -565,6 +583,7 @@ Key keys[] = {
   { XK_D, MODMASK, 0, log_debug},
   { XK_Q, MODMASK, 0, close_window},
   { XK_B, MODMASK, 0, toggle_border},
+  { XK_S, MODMASK, 0, make_switcher},
   { XK_Escape, MODMASK, 0, lower },
   { MODL, 0, 0, switch_windows },
   { MODR, 0, 0, switch_windows },
@@ -828,23 +847,82 @@ void log_event_begin(char *event_name) {
   FINE(buffer);
 }
 
-void handle_new_name(Window win) {
+void fetch_update_name(Window win) {
   Client *c = clients_find(win).data;
   if (!c) {
     INFO("no client for %x", win);
   }
+
   XFree(c->name);
-  if (!XFetchName(dsp, win, &c->name)) {
-    c->name = NULL;
-    INFO("no name for %x", win);
+  c->name = NULL;
+
+  char *name;
+
+  if (XFetchName(dsp, win, &name)) {
+    INFO("XFetchName found new name for %x [%s]", win, name);
+    c->name = strdup("ahhh\0");
+    return;
   }
+
+  // XTextProperty tp;
+  // if (XGetWMName(dsp, win, &tp)) {
+  //   char** strs;
+  //   int count;
+  //   if (XTextPropertyToStringList(&tp, &strs, &count) && count > 0) {
+  //     int l = strlen(strs[0]);
+  //     n = malloc(l);
+  //     strncpy(n, strs[0], l);
+  //     XFreeStringList(strs);
+  //     INFO("XGetWMName found name");
+  //     goto done;
+  //   }
+  // }
+
+  INFO("found no name for %x");
+  return;
 }
 
 void handle_property(XPropertyEvent* event) {
   Atom atom = event->atom;
   Window win = event->window;
   if (atom == XA_WM_NAME && event->state == PropertyNewValue) {
-    handle_new_name(win);
+    fetch_update_name(win);
+  }
+}
+
+void handle_expose(XExposeEvent* event) {
+  if (event->window != switcher_window) {
+    INFO("not the switcher");
+    return;
+  }
+
+  INFO("draw");
+
+  XClearWindow(dsp, switcher_window);
+
+  // todo free
+  XFontStruct* font = XLoadQueryFont(dsp, "fixed");
+  int height = font->ascent + font->descent;
+
+  XGCValues vals;
+  vals.foreground = XWhitePixel(dsp, 0);
+  vals.font = font->fid;
+  GC gc = XCreateGC(dsp, switcher_window,
+                    GCForeground | GCFont,
+                    &vals);
+
+  int y = height + 10;
+  for (unsigned int i = 0; i < clients.length; i++) {
+    Client *c = buffer_get(&clients, i);
+    char *str;
+    if (c->name) {
+      str = c->name;
+    } else {
+      str = "? whhhyy ?\0";
+    }
+    INFO("draw string %s for %x", str, c->win);
+    XDrawString(dsp, switcher_window, gc, 0, y, str, strlen(str));
+    y += height;
   }
 }
 
@@ -916,6 +994,10 @@ void handle_xevents() {
     case PropertyNotify:
       log_event_begin("property notify");
       handle_property((XPropertyEvent*)&event.xproperty);
+      break;
+    case Expose:
+      log_event_begin("expose");
+      handle_expose((XExposeEvent*)&event.xexpose);
       break;
     }
   }

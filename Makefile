@@ -1,5 +1,5 @@
-flags=-Wall -g -Werror -std=gnu99
-cc=gcc
+flags=-Wall -g -Werror -std=gnu99 -fno-strict-aliasing
+cc:=gcc
 
 all : wm test
 
@@ -8,7 +8,7 @@ test : test_buffer test_snap
 wm : wm.o snap.o buffer.c clients.o
 	$(cc) $(flags) -lX11 -o $@ $^
 
-%.o : %.c
+%.o : %.c %.h
 	$(cc) $(flags) -c -o $@ $<
 
 test_buffer : test_buffer.c buffer.c
@@ -19,3 +19,6 @@ test_snap : test_snap.c snap.c
 
 check-syntax :
 	$(cc) -fsyntax-only -Iglad/include $(CHK_SOURCES)
+
+clean :
+	rm *.o test_buffer test_snap wm
