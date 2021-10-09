@@ -1,4 +1,4 @@
-#include "buffer.h"
+#include "clientbuffer.h"
 #include "clients.h"
 #include "snap.h"
 #include <X11/Xatom.h>
@@ -225,7 +225,7 @@ unsigned int make_snap_lists(Client* skip, int** ls, int** rs, int** ts, int** b
 
   unsigned int count = 0;
   for (unsigned int ci = 0; ci < clients.length; ci++) {
-    Client* c = buffer_get(&clients, ci);
+    Client* c = cb_get(&clients, ci);
     if (skip == c) {
       continue;
     }
@@ -524,7 +524,7 @@ void lower() {
 void log_debug() {
   INFO("%d clients", clients.length);
   for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
+    Client *c = cb_get(&clients, i);
     INFO("%8x %s", c->win, c->name);
   }
 }
@@ -913,7 +913,7 @@ void handle_expose(XExposeEvent* event) {
 
   int y = height + 10;
   for (unsigned int i = 0; i < clients.length; i++) {
-    Client *c = buffer_get(&clients, i);
+    Client *c = cb_get(&clients, i);
     char *str;
     if (c->name) {
       str = c->name;
@@ -1062,8 +1062,8 @@ int main(int argc, char** argv) {
   }
   switching_colour = col;
 
-  buffer_init(&clients, 500, sizeof(Client));
-  buffer_init(&window_focus_history, 500, sizeof(Window));
+  cb_init(&clients, 500);
+  wb_init(&window_focus_history, 500);
 
   Window retroot, retparent;
   Window* children;

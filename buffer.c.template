@@ -1,0 +1,86 @@
+#include "{{header}}"
+#include <assert.h>
+#include <string.h>
+
+void {{prefix}}_init(struct {{typename}} *buf, unsigned long capacity) {
+  buf->length = 0;
+  buf->capacity = capacity;
+  buf->data = calloc(sizeof({{type}}), capacity);
+}
+
+void {{prefix}}_free(struct {{typename}} *buf) {
+  free(buf->data);
+  buf->data = NULL;
+  buf->capacity = 0;
+  buf->length = 0;
+}
+
+{{type}}* {{prefix}}_get(struct {{typename}} *buf, unsigned long index) {
+  assert(index < buf->length);
+  return &buf->data[index];
+}
+
+void {{prefix}}_add(struct {{typename}} *buf, {{type}}* data) {
+  assert(buf->length < buf->capacity); // fixme growable
+  memcpy(&buf->data[buf->length++], data, sizeof({{type}}));
+}
+
+void {{prefix}}_remove(struct {{typename}} *buf, unsigned long index) {
+  assert(index < buf->length);
+  unsigned long last = buf->length - 1;
+  if (index != last) {
+    memcpy(&buf->data[index], &buf->data[last], sizeof({{type}}));
+  }
+  buf->length = last;
+}
+
+// todo this can go faster for sure!
+// probably only need 3 memcpys int total
+void {{prefix}}_bring_to_front(struct {{typename}} *buf, unsigned long index) {
+  unsigned int len = buf->length;
+  assert(index < len);
+  size_t elem_size = sizeof({{type}});
+  size_t total_bytes = elem_size * len;
+
+  {{type}}* tmp = calloc(elem_size, len);
+  assert(tmp);
+  memcpy(tmp, buf->data, total_bytes);
+
+  unsigned int ii = 0;
+  for (unsigned int i = 0; i < len; i++) {
+    unsigned int to;
+    if (i == index) {
+      to = 0;
+    } else {
+      to = ++ii;
+    }
+    memcpy(&buf->data[to], &tmp[i], elem_size);
+  }
+
+  free(tmp);
+}
+
+// todo better
+void {{prefix}}_send_to_back(struct {{typename}} *buf, unsigned long index) {
+  unsigned int len = buf->length;
+  assert(index < len);
+  size_t elem_size = sizeof({{type}});
+  size_t total_bytes = elem_size * len;
+
+  {{type}}* tmp = malloc(total_bytes);
+  assert(tmp);
+  memcpy(tmp, buf->data, total_bytes);
+
+  unsigned int ii = 0;
+  for (unsigned int i = 0; i < len; i++) {
+    unsigned int to;
+    if (i == index) {
+      to = len - 1;
+    } else {
+      to = ii++;
+    }
+    memcpy(&buf->data[to], &tmp[i], elem_size);
+  }
+
+  free(tmp);
+}
