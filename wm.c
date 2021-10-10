@@ -92,6 +92,43 @@ char timer_expired = 0;
 #define MIN(a, b) ( a < b ? a : b )
 #define MAX(a, b) ( a > b ? a : b )
 
+void fetch_update_name(Window win) {
+  Client *c = clients_find(win).data;
+  if (!c) {
+    INFO("no client for %x", win);
+  }
+
+  char *name;
+  if (XFetchName(dsp, win, &name)) {
+    XFree(c->name);
+    c->name = name;
+    INFO("XFetchName found new name for %x [%s]", win, name);
+    return;
+  }
+
+  // todo there is some weird behaviour around XFetchName / GetWMName /
+  // WM_NAME. It sometimes it returns a value, sometimes it does not. For
+  // firefox at least, it seems to alternate!
+
+  // XTextProperty tp;
+  // if (XGetWMName(dsp, win, &tp)) {
+  //   char** strs;
+  //   int count;
+  //   if (XTextPropertyToStringList(&tp, &strs, &count) && count > 0) {
+  //     int l = strlen(strs[0]) + 1;
+  //     name = malloc(l);
+  //     strncpy(name, strs[0], l);
+  //     name[l-1] = '\0';
+  //     XFreeStringList(strs);
+  //     INFO("XGetWMName found name %s", name);
+  //     c->name = name;
+  //   }
+  // }
+
+  INFO("found no name for %x, value remains [%s]", win, c->name);
+  return;
+}
+
 void manage_new_window(Window win) {
   if (clients_find(win).data) {
     WARN("already tracking %x", win);
@@ -111,13 +148,13 @@ void manage_new_window(Window win) {
     return;
   }
 
-  char *name;
-  if (XFetchName(dsp, win, &name) && name) {
-    INFO("initial name for %x is [%s]", win, name);
-  } else {
-    name = NULL;
-    INFO("no initial name for %x", win);
-  }
+  // char *name;
+  // if (XFetchName(dsp, win, &name)) {
+  //   INFO("initial name for %x is [%s]", win, name);
+  // } else {
+  //   name = NULL;
+  //   INFO("no initial name for %x", win);
+  // }
 
   Client c;
   c.win = win;
@@ -127,8 +164,10 @@ void manage_new_window(Window win) {
   c.current_bounds.h = attr.height;
   c.max_state = MAX_NONE;
   c.border_width = BORDER_WIDTH;
-  c.name = name;
+  c.name = NULL;
   clients_add(&c);
+
+  fetch_update_name(win);
 
   XSetWindowBorderWidth(dsp, win, c.border_width);
   XSetWindowBorder(dsp, win, unfocused_colour.pixel);
@@ -583,29 +622,21 @@ Key keys[] = {
   { XK_D, MODMASK, 0, log_debug},
   { XK_Q, MODMASK, 0, close_window},
   { XK_B, MODMASK, 0, toggle_border},
-  { XK_S, MODMASK, 0, make_switcher},
+  // { XK_S, MODMASK, 0, make_switcher},
   { XK_Escape, MODMASK, 0, lower },
-  { MODL, 0, 0, switch_windows },
-  { MODR, 0, 0, switch_windows },
 };
 
-KeyCode kc_modl, kc_modr;
+Key kmodl = { MODL, 0, 0, switch_windows };
+Key kmodr = { MODR, 0, 0, switch_windows };
 
 void handle_key_press(XKeyEvent *event) {
-  KeyCode kc = event->keycode;
-  if (kc == kc_modl || kc == kc_modr) {
+  KeyCode ekc = event->keycode;
+  INFO("key: %d", ekc);
+  if (ekc == kmodl.kc || ekc == kmodr.kc) {
     prime_mod = 1;
+    return;
   } else {
     prime_mod = 0;
-  }
-}
-
-void handle_key_release(XKeyEvent *event) {
-  KeyCode ekc = event->keycode;
-
-  // special handling to avoid triggering mod binding if something else was pressed
-  if ((ekc == kc_modl || ekc == kc_modr) && prime_mod == 0) {
-    return;
   }
 
   for (unsigned int i = 0; i < sizeof(keys) / sizeof(Key); i++) {
@@ -613,8 +644,27 @@ void handle_key_release(XKeyEvent *event) {
     if (k.kc == ekc) {
       INFO("running binding for key index %d", i);
       (k.binding)();
+      return;
     }
   }
+}
+
+void handle_key_release(XKeyEvent *event) {
+  KeyCode ekc = event->keycode;
+  INFO("key: %d", ekc);
+
+  if (prime_mod == 0) {
+    return;
+  }
+
+  if (ekc == kmodl.kc) {
+    (kmodl.binding)();
+  }
+  if (ekc == kmodr.kc) {
+    (kmodr.binding)();
+  }
+
+  prime_mod = 0;
 }
 
 void handle_motion(XMotionEvent* event) {
@@ -847,44 +897,10 @@ void log_event_begin(char *event_name) {
   FINE(buffer);
 }
 
-void fetch_update_name(Window win) {
-  Client *c = clients_find(win).data;
-  if (!c) {
-    INFO("no client for %x", win);
-  }
-
-  XFree(c->name);
-  c->name = NULL;
-
-  char *name;
-
-  if (XFetchName(dsp, win, &name)) {
-    INFO("XFetchName found new name for %x [%s]", win, name);
-    c->name = strdup("ahhh\0");
-    return;
-  }
-
-  // XTextProperty tp;
-  // if (XGetWMName(dsp, win, &tp)) {
-  //   char** strs;
-  //   int count;
-  //   if (XTextPropertyToStringList(&tp, &strs, &count) && count > 0) {
-  //     int l = strlen(strs[0]);
-  //     n = malloc(l);
-  //     strncpy(n, strs[0], l);
-  //     XFreeStringList(strs);
-  //     INFO("XGetWMName found name");
-  //     goto done;
-  //   }
-  // }
-
-  INFO("found no name for %x");
-  return;
-}
-
 void handle_property(XPropertyEvent* event) {
   Atom atom = event->atom;
   Window win = event->window;
+  INFO("new property for %lx", win);
   if (atom == XA_WM_NAME && event->state == PropertyNewValue) {
     fetch_update_name(win);
   }
@@ -892,11 +908,9 @@ void handle_property(XPropertyEvent* event) {
 
 void handle_expose(XExposeEvent* event) {
   if (event->window != switcher_window) {
-    INFO("not the switcher");
+    FINE("not the switcher");
     return;
   }
-
-  INFO("draw");
 
   XClearWindow(dsp, switcher_window);
 
@@ -918,9 +932,8 @@ void handle_expose(XExposeEvent* event) {
     if (c->name) {
       str = c->name;
     } else {
-      str = "? whhhyy ?\0";
+      str = "???\0";
     }
-    INFO("draw string %s for %x", str, c->win);
     XDrawString(dsp, switcher_window, gc, 0, y, str, strlen(str));
     y += height;
   }
@@ -1001,6 +1014,13 @@ void handle_xevents() {
       break;
     }
   }
+}
+
+// set-up and grab the given key
+void setup_grab_key(Key *k) {
+  KeyCode kc = XKeysymToKeycode(dsp, k->sym);
+  k->kc = kc;
+  XGrabKey(dsp, kc, k->mods, root, False, GrabModeAsync, GrabModeAsync);
 }
 
 int main(int argc, char** argv) {
@@ -1084,17 +1104,11 @@ int main(int argc, char** argv) {
               GrabModeAsync, GrabModeAsync, None, None);
 
   for (unsigned int i = 0; i < sizeof(keys) / sizeof(Key); i++) {
-    Key k = keys[i];
-    KeyCode kc = XKeysymToKeycode(dsp, k.sym);
-
-    Key* kp = &keys[i];
-    kp->kc = kc;
-
-    XGrabKey(dsp, kc, k.mods, root, False, GrabModeAsync, GrabModeAsync);
+    setup_grab_key(&keys[i]);
   }
 
-  kc_modl = XKeysymToKeycode(dsp, MODL);
-  kc_modr = XKeysymToKeycode(dsp, MODR);
+  setup_grab_key(&kmodr);
+  setup_grab_key(&kmodl);
 
   XSelectInput(dsp, root, SubstructureRedirectMask | SubstructureNotifyMask);
 

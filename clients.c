@@ -47,14 +47,12 @@ void clients_del(Window win) {
 
   for (unsigned int i = 0; i < window_focus_history.length; i++) {
     Window* w = wb_get(&window_focus_history, i);
-    printf("trying to delete %lx, cand is %lx\n", win, *w);
     if (win == *w) {
       wb_remove(&window_focus_history, i);
       break;
     }
   }
 
-  printf("%ld %ld\n", clients.length, window_focus_history.length);
   assert(clients.length == window_focus_history.length);
 }
 

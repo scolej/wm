@@ -19,10 +19,7 @@ goals
 broken list / todo
 ------------------
 
-- transient for windows totally whacked?
-- fullscreen toggle / toggle border
-- initial window size, interpret hints correctly
-- improve special handling of mod-binding
+- fetching window names
 - focus on window quit?
 
 
@@ -32,3 +29,9 @@ big todo
 - mod-long-press -> window list
 - workspaces or window-configuration-registers
 - minimize
+
+
+not implemented
+--------------
+
+- window hints
